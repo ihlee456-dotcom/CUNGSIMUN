@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+        xmlns:video="http://www.google.com/schemas/sitemap-video/1.1">
+  <url>
+    <loc>https://YOUR-GITHUB-ID.github.io/</loc>
+    <lastmod>2026-11-04</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://YOUR-GITHUB-ID.github.io/assets/og-image.png</image:loc>
+    </image:image>
+    <video:video>
+      <video:thumbnail_loc>https://YOUR-GITHUB-ID.github.io/assets/clip-poster.jpg</video:thumbnail_loc>
+      <video:title>행2PM8PM 루프탑 공연 클립</video:title>
+      <video:description>청시문 앱의 공연 클립 예시 영상. 을지로 라이브 와인바 행2PM8PM 루프탑 무대.</video:description>
+      <video:content_loc>https://YOUR-GITHUB-ID.github.io/assets/clip.mp4</video:content_loc>
+      <video:duration>26</video:duration>
+      <video:publication_date>2026-10-29T00:00:00+09:00</video:publication_date>
+    </video:video>
+  </url>
+</urlset>
