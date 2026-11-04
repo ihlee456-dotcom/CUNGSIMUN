@@ -102,13 +102,13 @@
 컨택싱어는 현재 출시를 준비하고 있습니다. 이 사이트의 앱 화면은 시안이며, 출시 소식은 먼저 등록하신 싱어와 공연장에 가장 먼저 알려드릴 예정입니다.
 
 ## 페이지
-- [컨택싱어 첫 화면 · 이름 이야기](https://ihlee456-dotcom.github.io/): 연락 · 접촉 · 교제로 이어지는 서비스 구조
-- [앱 홈 · 공연 현황판](https://ihlee456-dotcom.github.io/home.html): 관객 · 싱어 · 공연장 역할 선택, 날짜별 행2PM8PM 공연
-- [행2PM8PM 공연 일정](https://ihlee456-dotcom.github.io/schedule.html): 날짜별 출연자와 요일별 공연 시간
-- [서비스 소개 · 팬 등급 · FAQ](https://ihlee456-dotcom.github.io/about.html)
-- [공연 예약](https://ihlee456-dotcom.github.io/booking.html): 행2PM8PM 공연 관람 예약(예약 = 방문 인증), 3층 루프탑 대관 견적
-- [싱어 등록](https://ihlee456-dotcom.github.io/artist-register.html): 활동명 · 나이 · 장르 · 편성 · 이력 · 공연 경력 · 음원 · 공연 영상 · 프로필 사진
-- [매장 등록](https://ihlee456-dotcom.github.io/venue-register.html): 상호 · 주소 · 사업자등록증 · 원하는 공연 스타일 · 공연장 사진 · 장비 보유 여부
+- [컨택싱어 첫 화면 · 이름 이야기](https://ihlee456-dotcom.github.io/CUNGSIMUN/): 연락 · 접촉 · 교제로 이어지는 서비스 구조
+- [앱 홈 · 공연 현황판](https://ihlee456-dotcom.github.io/CUNGSIMUN/home.html): 관객 · 싱어 · 공연장 역할 선택, 날짜별 행2PM8PM 공연
+- [행2PM8PM 공연 일정](https://ihlee456-dotcom.github.io/CUNGSIMUN/schedule.html): 날짜별 출연자와 요일별 공연 시간
+- [서비스 소개 · 팬 등급 · FAQ](https://ihlee456-dotcom.github.io/CUNGSIMUN/about.html)
+- [공연 예약](https://ihlee456-dotcom.github.io/CUNGSIMUN/booking.html): 행2PM8PM 공연 관람 예약(예약 = 방문 인증), 3층 루프탑 대관 견적
+- [싱어 등록](https://ihlee456-dotcom.github.io/CUNGSIMUN/artist-register.html): 활동명 · 나이 · 장르 · 편성 · 이력 · 공연 경력 · 음원 · 공연 영상 · 프로필 사진
+- [매장 등록](https://ihlee456-dotcom.github.io/CUNGSIMUN/venue-register.html): 상호 · 주소 · 사업자등록증 · 원하는 공연 스타일 · 공연장 사진 · 장비 보유 여부
 
 ## 참고
 - 이 사이트의 앱 화면은 출시 전 시안이다. 공연 클립 · 피드 · 싱어 프로필 · 팬 랭킹 · AI 매칭 화면에 나오는 새벽오렌지, 모래시계클럽, 하이볼트리오, 낮잠프로젝트 등의 싱어와 수치는 예시이며 실제 인물이나 실적이 아니다.

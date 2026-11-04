@@ -2,67 +2,67 @@
 
 User-agent: Googlebot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Google-Extended
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Yeti
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Daumoa
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Bingbot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: GPTBot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: OAI-SearchBot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: ChatGPT-User
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: ClaudeBot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Claude-SearchBot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Claude-User
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: PerplexityBot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Perplexity-User
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Applebot
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: Applebot-Extended
 Allow: /
-Disallow: /admin/
+Disallow: /CUNGSIMUN/admin.html
 
 User-agent: *
 Allow: /
-Disallow: /admin/
-Disallow: /404.html
+Disallow: /CUNGSIMUN/admin.html
+Disallow: /CUNGSIMUN/404.html
 
-Sitemap: https://ihlee456-dotcom.github.io/sitemap.xml
+Sitemap: https://ihlee456-dotcom.github.io/CUNGSIMUN/sitemap.xml
