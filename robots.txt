@@ -1,52 +1,68 @@
-# 청시문 — 검색엔진과 AI 검색 모두 허용
+# 컨택싱어 — 검색엔진과 AI 검색 모두 허용 (관리자 화면 /admin/ 은 제외)
 
 User-agent: Googlebot
 Allow: /
+Disallow: /admin/
 
 User-agent: Google-Extended
 Allow: /
+Disallow: /admin/
 
 User-agent: Yeti
 Allow: /
+Disallow: /admin/
 
 User-agent: Daumoa
 Allow: /
+Disallow: /admin/
 
 User-agent: Bingbot
 Allow: /
+Disallow: /admin/
 
 User-agent: GPTBot
 Allow: /
+Disallow: /admin/
 
 User-agent: OAI-SearchBot
 Allow: /
+Disallow: /admin/
 
 User-agent: ChatGPT-User
 Allow: /
+Disallow: /admin/
 
 User-agent: ClaudeBot
 Allow: /
+Disallow: /admin/
 
 User-agent: Claude-SearchBot
 Allow: /
+Disallow: /admin/
 
 User-agent: Claude-User
 Allow: /
+Disallow: /admin/
 
 User-agent: PerplexityBot
 Allow: /
+Disallow: /admin/
 
 User-agent: Perplexity-User
 Allow: /
+Disallow: /admin/
 
 User-agent: Applebot
 Allow: /
+Disallow: /admin/
 
 User-agent: Applebot-Extended
 Allow: /
+Disallow: /admin/
 
 User-agent: *
 Allow: /
+Disallow: /admin/
 Disallow: /404.html
 
-Sitemap: https://YOUR-GITHUB-ID.github.io/sitemap.xml
+Sitemap: https://ihlee456-dotcom.github.io/sitemap.xml
