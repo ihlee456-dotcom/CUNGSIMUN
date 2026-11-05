@@ -102,7 +102,7 @@
 컨택싱어는 현재 출시를 준비하고 있습니다. 이 사이트의 앱 화면은 시안이며, 출시 소식은 먼저 등록하신 싱어와 공연장에 가장 먼저 알려드릴 예정입니다.
 
 ## 페이지
-- [컨택싱어 시작 화면](https://ihlee456-dotcom.github.io/CUNGSIMUN/): 프로필 고르기(라이브바 사장님 · 손님 · 가수)와 서비스 소개
+- [컨택싱어 시작 화면](https://ihlee456-dotcom.github.io/CUNGSIMUN/): 행2PM8PM 무대 하이라이트 영상, 프로필 고르기(라이브바 사장님 · 손님 · 가수)와 서비스 소개
 - [앱 홈](https://ihlee456-dotcom.github.io/CUNGSIMUN/home.html): 고른 프로필에 맞는 화면, 날짜별 행2PM8PM 공연
 - [행2PM8PM 공연 일정](https://ihlee456-dotcom.github.io/CUNGSIMUN/schedule.html): 날짜별 출연자와 요일별 공연 시간
 - [서비스 소개 · 팬 등급 · FAQ](https://ihlee456-dotcom.github.io/CUNGSIMUN/about.html)

@@ -9,10 +9,34 @@
     <priority>1.0</priority>
     <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/og-image.png</image:loc></image:image>
     <video:video>
-      <video:thumbnail_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/clip-poster.jpg</video:thumbnail_loc>
-      <video:title>행2PM8PM 루프탑 공연 클립</video:title>
-      <video:description>컨택싱어 앱의 공연 클립 예시 영상. 을지로 라이브 와인바 행2PM8PM 루프탑 무대.</video:description>
-      <video:content_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/clip.mp4</video:content_loc>
+      <video:thumbnail_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/stage-mix.jpg</video:thumbnail_loc>
+      <video:title>컨택싱어 무대 하이라이트 · 행2PM8PM</video:title>
+      <video:description>을지로 라이브 와인바 행2PM8PM 무대에 선 여러 가수들의 공연 장면을 짧게 이어 붙인 영상. 기타 솔로, 보컬 듀오, 솔로 보컬과 휴대폰으로 무대를 담는 손님들.</video:description>
+      <video:content_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/stage-mix.mp4</video:content_loc>
+      <video:duration>14</video:duration>
+      <video:publication_date>2026-11-05T00:00:00+09:00</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-guitar.jpg</video:thumbnail_loc>
+      <video:title>행2PM8PM 어쿠스틱 기타 라이브</video:title>
+      <video:description>을지로 라이브 와인바 행2PM8PM 무대에서 찍은 실제 공연 영상. 기타 한 대로 채운 저녁 무대. 손님들이 휴대폰을 들어 노래를 담았어요.</video:description>
+      <video:content_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-guitar.mp4</video:content_loc>
+      <video:duration>26</video:duration>
+      <video:publication_date>2026-11-05T00:00:00+09:00</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-duo.jpg</video:thumbnail_loc>
+      <video:title>행2PM8PM 듀오 보컬 라이브</video:title>
+      <video:description>을지로 라이브 와인바 행2PM8PM 무대에서 찍은 실제 공연 영상. 두 목소리가 번갈아 주고받는 무대. 서로 눈을 맞추며 화음을 쌓아요.</video:description>
+      <video:content_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-duo.mp4</video:content_loc>
+      <video:duration>24</video:duration>
+      <video:publication_date>2026-11-05T00:00:00+09:00</video:publication_date>
+    </video:video>
+    <video:video>
+      <video:thumbnail_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-vocal.jpg</video:thumbnail_loc>
+      <video:title>행2PM8PM 솔로 보컬 라이브</video:title>
+      <video:description>을지로 라이브 와인바 행2PM8PM 무대에서 찍은 실제 공연 영상. 손짓 하나로 객석을 이끄는 보컬 무대. 노래가 끝나면 박수가 쏟아져요.</video:description>
+      <video:content_loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/live-vocal.mp4</video:content_loc>
       <video:duration>26</video:duration>
       <video:publication_date>2026-10-29T00:00:00+09:00</video:publication_date>
     </video:video>
@@ -22,14 +46,14 @@
     <lastmod>2026-11-05</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/clip-poster.jpg</image:loc></image:image>
+    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/stage-mix.jpg</image:loc></image:image>
   </url>
   <url>
     <loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/schedule.html</loc>
     <lastmod>2026-11-05</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
-    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/clip-poster.jpg</image:loc></image:image>
+    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/stage-mix.jpg</image:loc></image:image>
   </url>
   <url>
     <loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/about.html</loc>
@@ -42,7 +66,7 @@
     <lastmod>2026-11-05</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>
-    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/clip-poster.jpg</image:loc></image:image>
+    <image:image><image:loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/stage-mix.jpg</image:loc></image:image>
   </url>
   <url>
     <loc>https://ihlee456-dotcom.github.io/CUNGSIMUN/artist-register.html</loc>

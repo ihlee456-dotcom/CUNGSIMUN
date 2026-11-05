@@ -224,11 +224,36 @@
   }
 
   // 시작 화면: 넷플릭스처럼 프로필 고르기 → (처음이면) 정보 입력 → 정보 받는 중 1~100% → 홈
+  /* ---------- 무대 영상: 화면에 보이는 영상만 소리 없이 반복 재생 ---------- */
+  var REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function autoVideos() {
+    var vids = $$('video[data-auto]');
+    if (!vids.length || REDUCED) return;
+    function play(v) { v.muted = true; if (v.preload !== 'auto') v.preload = 'auto'; var p = v.play(); if (p && p.catch) p.catch(function () { /* 자동재생 제한: 포스터만 보임 */ }); }
+    if (!('IntersectionObserver' in window)) { vids.forEach(function (v) { if (v.offsetParent) play(v); }); return; }
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting && e.target.offsetParent) play(e.target); else e.target.pause(); });
+    }, { threshold: 0.35 });
+    vids.forEach(function (v) { io.observe(v); });
+  }
+
   PAGES.intro = function () {
     var pick = $('#step-pick'), info = $('#step-info'), load = $('#step-load');
     if (!pick) return;
     ['venue', 'fan', 'artist'].forEach(function (r) { var el = $('[data-pname="' + r + '"]'); if (el) el.textContent = profileName(r); });
-    function show(step) { pick.hidden = step !== 'pick'; info.hidden = step !== 'info'; load.hidden = step !== 'load'; window.scrollTo(0, 0); }
+    var hv = $('#pf-video'), hb = $('#pf-vbtn'), userPaused = REDUCED;
+    function drawHb() { if (!hb) return; var off = hv.paused; hb.setAttribute('aria-pressed', off ? 'true' : 'false'); hb.setAttribute('aria-label', off ? '영상 재생' : '영상 멈추기'); $('.i-pause', hb).hidden = off; $('.i-play', hb).hidden = !off; }
+    function heroPlay() { if (!hv) return; var p = hv.play(); if (p && p.catch) p.catch(function () { drawHb(); }); }
+    if (hv) {
+      if (REDUCED) { hv.removeAttribute('autoplay'); hv.pause(); }
+      hv.addEventListener('play', drawHb); hv.addEventListener('pause', drawHb);
+      if (hb) hb.addEventListener('click', function () { if (hv.paused) { userPaused = false; heroPlay(); } else { userPaused = true; hv.pause(); } });
+      drawHb();
+    }
+    function show(step) {
+      pick.hidden = step !== 'pick'; info.hidden = step !== 'info'; load.hidden = step !== 'load'; window.scrollTo(0, 0);
+      if (hv) { if (step === 'pick' && !userPaused) heroPlay(); else if (step !== 'pick') hv.pause(); }
+    }
     function openInfo(r) {
       $$('[data-role-step]').forEach(function (s) { s.hidden = s.getAttribute('data-role-step') !== r; });
       show('info');
@@ -309,15 +334,69 @@
   };
 
   PAGES.clip = function () {
-    var v = $('#clip-video'), sb = $('#sound');
-    if (v && sb) sb.addEventListener('click', function () {
+    var v = $('#clip-video'), sb = $('#sound'), CL = D.clips || [];
+    if (!v) return;
+    var BASE = [1024, 812, 1350], q = +(new URLSearchParams(location.search).get('v') || 1);
+    var i = Math.min(Math.max(1, q || 1), Math.max(1, CL.length)) - 1, lb = $('#like'), fb = $('#follow');
+    function cur() { return CL[i] || {}; }
+    function drawLike() {
+      var on = !!(st('liked', {})['clip-' + cur().id]);
+      lb.setAttribute('aria-pressed', on ? 'true' : 'false'); $('[data-count]', lb).textContent = won((BASE[i] || 900) + (on ? 1 : 0));
+    }
+    function drawFollow() {
+      var on = !!(st('follow-clips', {})[cur().id]);
+      fb.setAttribute('aria-pressed', on ? 'true' : 'false'); fb.textContent = on ? '팔로잉' : '팔로우'; fb.classList.toggle('light', !on); fb.classList.toggle('ghost', on);
+    }
+    function setClip(n, first) {
+      if (!CL.length) return;
+      i = (n + CL.length) % CL.length;
+      var c = cur();
+      if (!first) {
+        v.classList.add('swap');
+        v.src = '' + c.src; v.poster = '' + c.poster;
+        v.setAttribute('aria-label', '행2PM8PM ' + c.title);
+        var p = v.play(); if (p && p.catch) p.catch(function () { /* 자동재생 제한 */ });
+        setTimeout(function () { v.classList.remove('swap'); }, 180);
+        try { history.replaceState(null, '', '?v=' + c.n); } catch (e) { /* 미리보기 등 주소 변경 불가 */ }
+      }
+      $('#clip-h1').textContent = '행2PM8PM ' + c.title;
+      $('#clip-title').textContent = c.title;
+      $('#clip-sub').textContent = c.sub + ' · 행2PM8PM 실제 공연';
+      $('#clip-cap').textContent = c.cap;
+      $('#clip-thumb').src = '' + c.prev_poster;
+      $('#clip-idx').textContent = '행2PM8PM · ' + (i + 1) + ' / ' + CL.length;
+      $$('#clip-dots i').forEach(function (d, k) { d.classList.toggle('on', k === i); });
+      drawLike(); drawFollow();
+    }
+    if (sb) sb.addEventListener('click', function () {
       v.muted = !v.muted; if (!v.muted) v.play().catch(function () { /* 자동재생 제한 */ });
       sb.setAttribute('aria-pressed', v.muted ? 'false' : 'true'); sb.setAttribute('aria-label', v.muted ? '소리 켜기' : '소리 끄기');
       $('.ic-mute', sb).hidden = !v.muted; $('.ic-sound', sb).hidden = v.muted;
     });
-    likeBtn($('#like'), 'clip', 1024);
-    followBtn($('#follow'));
-    var sh = $('#share'); if (sh) sh.addEventListener('click', function () { share('컨택싱어 공연 클립'); });
+    lb.addEventListener('click', function () { var l = st('liked', {}); l['clip-' + cur().id] = !l['clip-' + cur().id]; put('liked', l); drawLike(); });
+    fb.addEventListener('click', function () {
+      var f = st('follow-clips', {}); f[cur().id] = !f[cur().id]; put('follow-clips', f); drawFollow();
+      toast(f[cur().id] ? '팔로우했어요 · 이 가수의 다음 무대를 알려드릴게요' : '팔로우를 취소했어요');
+    });
+    $('#clip-next').addEventListener('click', function () { setClip(i + 1); });
+    $('#clip-prev').addEventListener('click', function () { setClip(i - 1); });
+    // 위로 밀면 다음 영상, 아래로 밀면 이전 영상 (릴스처럼)
+    var y0 = null;
+    v.addEventListener('touchstart', function (e) { y0 = e.touches[0].clientY; }, { passive: true });
+    v.addEventListener('touchend', function (e) {
+      if (y0 === null) return; var dy = e.changedTouches[0].clientY - y0; y0 = null;
+      if (Math.abs(dy) > 50) setClip(dy < 0 ? i + 1 : i - 1);
+    });
+    var wheelAt = 0;
+    v.addEventListener('wheel', function (e) { var now = Date.now(); if (now - wheelAt < 700 || Math.abs(e.deltaY) < 30) return; wheelAt = now; setClip(e.deltaY > 0 ? i + 1 : i - 1); }, { passive: true });
+    document.addEventListener('keydown', function (e) {
+      if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setClip(i + 1); } else if (e.key === 'ArrowUp') { e.preventDefault(); setClip(i - 1); }
+    });
+    v.addEventListener('click', function () { if (v.paused) v.play().catch(function () {}); else v.pause(); });
+    if (q > 1 && CL[i]) { v.src = '' + CL[i].src; v.poster = '' + CL[i].poster; v.play && v.play().catch(function () {}); }
+    setClip(i, true);
+    var sh = $('#share'); if (sh) sh.addEventListener('click', function () { share('컨택싱어 · 행2PM8PM ' + cur().title); });
     var ns = nextShow(), box = $('#tonight');
     if (box && ns) {
       $('[data-k="head"]', box).textContent = ns.d === TODAY ? '이 무대, 오늘 밤에도 열려요' : '이 무대의 다음 공연 · ' + dayLabel(ns.d);
@@ -660,6 +739,7 @@
   /* ---------- 실행 ---------- */
   var page = document.body.getAttribute('data-page');
   if (PAGES[page]) PAGES[page]();
+  autoVideos();
   // 화면 지도의 '오늘' 공연 줄
   var tl = $('[data-bind="tonight"]');
   if (tl) { var ns = nextShow(); tl.textContent = ns ? (ns.d === TODAY ? '오늘 ' : dayLabel(ns.d) + ' ') + ns.t + ' · ' + who(ns) : '다음 일정 준비 중'; }
