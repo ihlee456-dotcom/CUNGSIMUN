@@ -201,96 +201,103 @@
   /* ---------- 화면별 ---------- */
   var PAGES = {};
 
-  PAGES.home = function () {
-    var ROLES = ['fan', 'venue', 'artist'];
-    var LABEL = { fan: '손님', venue: '라이브바 사장님', artist: '가수' };
-    var q = new URLSearchParams(location.search).get('role');
-    var role = ROLES.indexOf(q) >= 0 ? q : st('role', '');
-    if (ROLES.indexOf(role) < 0) role = '';
-    function profile(r) { return st('profile-' + r, null); }
-    function greet() {
-      ROLES.forEach(function (r) {
-        var el = $('[data-greet="' + r + '"]'); if (!el) return;
-        var p = profile(r);
-        if (!p) { el.textContent = LABEL[r] + ' 정보를 입력하면 맞춤 화면이 열려요'; return; }
-        el.textContent = r === 'venue' ? p.venue + ' · ' + p.owner + ' 사장님, 반가워요' : p.name + '님, 반가워요';
-        var btn = $('[data-edit="' + r + '"]'); if (btn) btn.textContent = '정보 수정';
-      });
-    }
-    function setRole(r, ask) {
-      role = r;
-      $$('[data-role]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-role') === r ? 'true' : 'false'); });
-      var view = r || 'fan';
-      $$('[data-for-role]').forEach(function (s) { s.hidden = s.getAttribute('data-for-role') !== view; });
-      if (r) put('role', r);
-      if (ask && r && !profile(r)) openSheet('form-' + r);
-    }
-    $$('[data-role]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var r = b.getAttribute('data-role');
-        setRole(r, true);
-        if (profile(r)) { var v = document.getElementById('view-' + r); if (v) v.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      });
-    });
-    $$('[data-edit]').forEach(function (b) { b.addEventListener('click', function () { openSheet('form-' + b.getAttribute('data-edit')); }); });
+  var ROLE_LABEL = { venue: '라이브바 사장님', fan: '손님', artist: '가수' };
+  function profileOf(r) { return st('profile-' + r, null); }
+  function profileName(r) { var p = profileOf(r); return p ? (r === 'venue' ? p.venue : p.name) : ''; }
 
-    function setupForm(r, req, agreeId, fill, collect, inbox) {
-      var wrap = document.getElementById('form-' + r); if (!wrap) return;
-      var form = $('form', wrap);
-      $$('[role="group"]', form).forEach(function (g) { var isMulti = /여러 개/.test(g.textContent.slice(0, 40)); (isMulti ? multi : single)(g); });
-      var p = profile(r);
-      if (p) Object.keys(fill).forEach(function (id) { var el = document.getElementById(id); if (el && p[fill[id]] != null) el.value = p[fill[id]]; });
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        if (!requireFields(form, req)) return;
-        if (!agreeOk(agreeId)) return;
-        var data = collect(); data.at = TODAY;
-        put('profile-' + r, data);
-        if (inbox) inboxAdd(inbox[0], inbox[1](data));
-        closeSheet(wrap); greet(); setRole(r, false);
-        toast(r === 'venue' ? data.venue + ' 등록을 시작했어요' : '반가워요, ' + data.name + '님!');
-        var v = document.getElementById('view-' + r); if (v) setTimeout(function () { v.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 50);
-      });
-    }
-    setupForm('fan', ['pf-name'], 'pf-agree', { 'pf-name': 'name', 'pf-phone': 'phone' }, function () {
-      return { name: val('pf-name'), phone: val('pf-phone'), genres: picked($('#pf-genres')), area: picked($('#pf-area'))[0] || '' };
+  // 프로필 정보 입력 폼 (시작 화면)
+  function setupRoleForm(r, req, agreeId, fill, collect, inbox, done) {
+    var form = $('[data-form="' + r + '"]'); if (!form) return;
+    $$('[role="group"]', form).forEach(function (g) { (/여러 개/.test(g.textContent.slice(0, 40)) ? multi : single)(g); });
+    var p = profileOf(r);
+    if (p) Object.keys(fill).forEach(function (id) { var el = document.getElementById(id); if (el && p[fill[id]] != null) el.value = p[fill[id]]; });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!requireFields(form, req)) return;
+      if (!agreeOk(agreeId)) return;
+      var data = collect(); data.at = TODAY;
+      put('profile-' + r, data);
+      if (inbox) inboxAdd(inbox[0], inbox[1](data));
+      done(r);
     });
-    setupForm('venue', ['pv-venue', 'pv-owner', 'pv-phone'], 'pv-agree', { 'pv-venue': 'venue', 'pv-owner': 'owner', 'pv-phone': 'phone', 'pv-area': 'area' }, function () {
+    var skip = $('[data-skip="' + r + '"]', form); if (skip) skip.addEventListener('click', function () { done(r); });
+  }
+
+  // 시작 화면: 넷플릭스처럼 프로필 고르기 → (처음이면) 정보 입력 → 정보 받는 중 1~100% → 홈
+  PAGES.intro = function () {
+    var pick = $('#step-pick'), info = $('#step-info'), load = $('#step-load');
+    if (!pick) return;
+    ['venue', 'fan', 'artist'].forEach(function (r) { var el = $('[data-pname="' + r + '"]'); if (el) el.textContent = profileName(r); });
+    function show(step) { pick.hidden = step !== 'pick'; info.hidden = step !== 'info'; load.hidden = step !== 'load'; window.scrollTo(0, 0); }
+    function openInfo(r) {
+      $$('[data-role-step]').forEach(function (s) { s.hidden = s.getAttribute('data-role-step') !== r; });
+      show('info');
+      var h = document.getElementById('info-' + r + '-t'); if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+    }
+    function startLoad(r) {
+      put('role', r);
+      var tpl = $('#av-tpl'), slot = $('#load-av');
+      if (tpl && slot && tpl.content) { slot.innerHTML = ''; slot.appendChild(tpl.content.querySelector('.av-' + r).cloneNode(true)); }
+      $('#load-name').textContent = ROLE_LABEL[r] + (profileName(r) ? ' · ' + profileName(r) : '');
+      show('load');
+      var pct = $('#sp-pct'), fill = $('#sp-fill'), bar = $('#sp-bar'), DUR = 5000, t0 = null, gone = false;
+      function go() { if (gone) return; gone = true; location.replace('home.html'); }
+      function step(ts) {
+        if (t0 === null) t0 = ts;
+        var k = Math.min(1, (ts - t0) / DUR), v = Math.max(1, Math.round(k * 100));
+        pct.textContent = v; fill.style.width = v + '%'; bar.setAttribute('aria-valuenow', v);
+        if (k < 1) requestAnimationFrame(step); else setTimeout(go, 300);
+      }
+      requestAnimationFrame(step);
+      setTimeout(go, DUR + 1500);
+    }
+    $$('[data-pick]').forEach(function (b) {
+      b.addEventListener('click', function () { var r = b.getAttribute('data-pick'); if (profileOf(r)) startLoad(r); else openInfo(r); });
+    });
+    $('#pf-back').addEventListener('click', function () { show('pick'); });
+    setupRoleForm('fan', ['pf-name'], 'pf-agree', { 'pf-name': 'name', 'pf-phone': 'phone' }, function () {
+      return { name: val('pf-name'), phone: val('pf-phone'), genres: picked($('#pf-genres')), area: picked($('#pf-area'))[0] || '' };
+    }, null, startLoad);
+    setupRoleForm('venue', ['pv-venue', 'pv-owner', 'pv-phone'], 'pv-agree', { 'pv-venue': 'venue', 'pv-owner': 'owner', 'pv-phone': 'phone', 'pv-area': 'area' }, function () {
       return { venue: val('pv-venue'), owner: val('pv-owner'), phone: val('pv-phone'), area: val('pv-area'), styles: picked($('#pv-styles')), days: picked($('#pv-days')) };
     }, ['venues', function (d) {
       return { name: d.venue, owner: d.owner, category: '라이브바', address: d.area, biz: '', cert: false, phone: d.phone, capacity: '', days: d.days, hours: '',
                styles: d.styles, equipment: [], photos: 0, created: TODAY, status: 'pending' };
-    }]);
-    setupForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-link': 'link' }, function () {
+    }], startLoad);
+    setupRoleForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-link': 'link' }, function () {
       return { name: val('pa-name'), phone: val('pa-phone'), lineup: picked($('#pa-lineup'))[0] || '', genres: picked($('#pa-genres')), link: val('pa-link') };
     }, ['artists', function (d) {
       return { name: d.name, lineup: d.lineup, genres: d.genres, age: '', region: '', phone: d.phone, bio: '', careers: [],
                tracks: d.link ? [['대표 링크', d.link]] : [], video: '', created: TODAY, status: 'pending' };
-    }]);
-    greet();
-    setRole(role, false);
+    }], startLoad);
+    var edit = new URLSearchParams(location.search).get('edit');
+    if (edit && ROLE_LABEL[edit]) openInfo(edit);
+  };
+
+  // 홈: 시작 화면에서 고른 프로필에 맞는 화면만
+  PAGES.home = function () {
+    var q = new URLSearchParams(location.search).get('as');
+    var role = ROLE_LABEL[q] ? q : st('role', 'fan');
+    if (!ROLE_LABEL[role]) role = 'fan';
+    if (q) put('role', role);
+    $$('[data-for-role]').forEach(function (s) { s.hidden = s.getAttribute('data-for-role') !== role; });
+    var p = profileOf(role), g = $('[data-greet="' + role + '"]'), e = $('[data-edit="' + role + '"]');
+    if (p && g) g.textContent = role === 'venue' ? p.venue + ' · ' + p.owner + ' 사장님, 반가워요' : p.name + '님, 반가워요';
+    if (p && e) e.textContent = '정보 수정';
     bindReq(document, true);
     var vw = $('#v-week'); if (vw) vw.innerHTML = weekHtml();
-
-    // 배너: 넘길 때 몇 번째인지 표시
-    var track = $('#bnr'), idx = $('#bnr-i');
-    if (track && idx) track.addEventListener('scroll', function () {
-      var w = track.firstElementChild ? track.firstElementChild.getBoundingClientRect().width + 10 : 1;
-      idx.textContent = Math.min(track.children.length, Math.round(track.scrollLeft / w) + 1);
-    }, { passive: true });
     // 검색: 가수 이름으로 다음 공연 찾기
     var form = $('#search');
-    if (form) form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var q = $('#q').value.trim().replace(/\s+/g, '').toLowerCase(); if (!q) return;
-      var hit = D.shows.filter(function (s) { return s.d >= TODAY && s.a && s.a.replace(/\s+/g, '').toLowerCase().indexOf(q) >= 0; })
+    if (form) form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var qq = $('#q').value.trim().replace(/\s+/g, '').toLowerCase(); if (!qq) return;
+      var hit = D.shows.filter(function (s) { return s.d >= TODAY && s.a && s.a.replace(/\s+/g, '').toLowerCase().indexOf(qq) >= 0; })
         .sort(function (x, y) { return (x.d + x.t) < (y.d + y.t) ? -1 : 1; })[0];
       if (hit) location.href = 'schedule.html#d-' + hit.d;
       else toast('‘' + $('#q').value.trim() + '’ 님의 다가오는 공연을 찾지 못했어요');
     });
     board($('#board'));
     bindFan();
-    // 내 예약
     var mine = (store.get(BOOK_KEY, []) || []).filter(function (b) { return b.d >= TODAY; });
     var box = $('#my-bookings');
     if (box && mine.length) {
@@ -298,15 +305,6 @@
       $('ul', box).innerHTML = mine.slice(0, 3).map(function (b) {
         return '<li><span class="t"><b>' + esc(dayLabel(b.d) + ' ' + b.t + ' · ' + b.a) + '</b><span>행2PM8PM · ' + b.ppl + '명 · 방문하면 직관 인증</span></span><span class="pill yes">예약됨</span></li>';
       }).join('');
-    }
-    // 알림
-    var nl = $('#noti-list');
-    if (nl) {
-      var ns = nextShow(), items = [];
-      if (ns) items.push(['<b>' + (ns.d === TODAY ? '오늘 ' : dayLabel(ns.d) + ' ') + esc(ns.t) + ' ' + esc(who(ns)) + '</b> 공연이 열려요', '행2PM8PM · 을지로 · 무료 라이브', bookHref(ns)]);
-      items.push(['<b>새벽오렌지</b>가 새 공연 클립을 올렸어요', '행2PM8PM 루프탑 · 0:26', 'clip.html']);
-      items.push(['<b>공연 후 사진 · 인사</b> 혜택이 열려 있어요', '직관 단골 · 후원자 등급 혜택', 'artist.html']);
-      nl.innerHTML = items.map(function (it) { return '<li><a class="row" href="' + it[2] + '" style="color:var(--fg);text-decoration:none;flex:1;min-height:44px"><span class="t"><span style="font-size:14px">' + it[0] + '</span><span>' + it[1] + '</span></span>' + ICON.chev + '</a></li>'; }).join('');
     }
   };
 
@@ -659,22 +657,6 @@
   PAGES.about = function () { };
 
   // 첫 화면: 연락 · 접촉 · 교제를 고르면 연결 그림과 설명 카드가 함께 바뀐다
-  // 시작 화면: 5초 동안 1~100% 올라간 뒤 홈으로
-  PAGES.intro = function () {
-    var pct = $('#sp-pct'), fill = $('#sp-fill'), bar = $('#sp-bar');
-    if (!pct) return;
-    var DUR = 5000, t0 = null, done = false;
-    function go() { if (done) return; done = true; location.replace('home.html'); }
-    function step(ts) {
-      if (t0 === null) t0 = ts;
-      var k = Math.min(1, (ts - t0) / DUR), v = Math.max(1, Math.round(k * 100));
-      pct.textContent = v; fill.style.width = v + '%'; bar.setAttribute('aria-valuenow', v);
-      if (k < 1) requestAnimationFrame(step); else setTimeout(go, 300);
-    }
-    requestAnimationFrame(step);
-    setTimeout(go, DUR + 1500);
-  };
-
   /* ---------- 실행 ---------- */
   var page = document.body.getAttribute('data-page');
   if (PAGES[page]) PAGES[page]();
