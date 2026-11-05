@@ -419,25 +419,40 @@ tbody tr:last-child > *{border-bottom:0}
 .screens a.row{display:flex;padding:0}
 .screens a.row:hover{background:transparent}
 
-/* 첫 방문 소개 팝업 */
 [tabindex="-1"]:focus{outline:none}
-.sheet-bg.center{align-items:center;padding:20px max(20px,env(safe-area-inset-left,0px))}
-.pop{width:100%;max-width:340px;display:flex;flex-direction:column;gap:14px;padding:22px 20px 0;border-radius:18px;background:var(--bg);box-shadow:0 20px 50px rgba(20,20,24,.22);overflow:hidden;animation:pop-in .22s ease-out}
-@keyframes pop-in{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
-.pop-hd{display:flex;align-items:center;gap:12px}
-.pop h2{font:800 22px/1.2 var(--display);letter-spacing:-.8px}
-.pop-en{font-size:11px;font-weight:700;letter-spacing:1.2px;color:var(--muted)}
-.pop-lead{font-size:14px;line-height:1.6;color:var(--fg-2)}
-.pop-lead b{color:var(--fg)}
-.pop-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line-2);border-radius:12px}
-.pop-list li{display:flex;gap:12px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+/* 시작 화면 (5초) */
+.splash{position:relative;min-height:calc(100dvh - 44px);display:flex;flex-direction:column;justify-content:space-between;gap:28px;padding:64px 0 20px}
+.sp-body{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px}
+.mark-badge.xl{width:76px;height:76px;border-radius:38px;margin-bottom:6px}
+.sp-name{font:800 34px/1.15 var(--display);letter-spacing:-1.2px}
+.sp-en{font-size:12px;font-weight:700;letter-spacing:2px;color:var(--muted)}
+.sp-en span{color:var(--accent-text)}
+.sp-lead{font-size:15px;line-height:1.6;color:var(--fg-2);margin-top:6px}
+.sp-lead b{color:var(--fg)}
+.sp-list{width:100%;margin-top:18px;text-align:left}
+.sp-load{display:flex;flex-direction:column;align-items:center;gap:8px}
+.sp-pct{font-size:30px;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.sp-pct b{font-weight:800}
+.sp-bar{width:100%;max-width:260px;height:6px;border-radius:3px;background:var(--line-2);overflow:hidden}
+.sp-bar i{display:block;width:1%;height:100%;border-radius:3px;background:var(--accent)}
+.sp-msg{font-size:13px;color:var(--muted)}
+.sp-skip{position:absolute;top:4px;right:-8px;min-height:44px;display:flex;align-items:center;padding:0 8px;font-size:13px;color:var(--muted);text-decoration:none}
+.pop-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--line-2);border-radius:12px;background:var(--bg)}
+.pop-list li{display:flex;gap:12px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line)}
 .pop-list li:last-child{border-bottom:0}
 .pop-list b{flex:none;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent-text);font-size:12.5px}
 .pop-list span{display:flex;flex-direction:column;gap:1px;font-size:13px;line-height:1.45;color:var(--fg)}
 .pop-list em{font-style:normal;font-size:11.5px;color:var(--muted)}
-.pop-loop{font-size:12px;color:var(--muted);margin-top:-4px}
-.pop-ft{display:grid;grid-template-columns:1fr 1fr;margin:0 -20px;border-top:1px solid var(--line)}
-.pop-ft button{min-height:48px;border:0;background:transparent;color:var(--muted);font-size:13px;cursor:pointer}
-.pop-ft button + button{border-left:1px solid var(--line);color:var(--fg);font-weight:600}
-@media (prefers-reduced-motion:reduce){.pop{animation:none}}
+/* 홈: 나는 누구입니까? */
+.who-btn{width:100%;min-height:66px;display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:14px;border:1px solid var(--line-2);background:var(--bg);color:var(--fg);text-align:left;cursor:pointer}
+.who-btn .ic{flex:none;width:42px;height:42px;display:grid;place-items:center;border-radius:21px;background:var(--surface);color:var(--fg-2)}
+.who-btn .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.who-btn .t b{font-size:15px}
+.who-btn .t small{font-size:12.5px;color:var(--muted)}
+.who-btn[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+.who-btn[aria-pressed="true"] .ic{background:var(--accent);color:#fff}
+.hello{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:14px;background:var(--surface)}
+.hello b{font-size:15px;line-height:1.4}
+[data-for-role]{scroll-margin-top:110px}
+.sheet.form-sheet{max-height:calc(100dvh - 24px);overflow-y:auto;gap:16px}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
