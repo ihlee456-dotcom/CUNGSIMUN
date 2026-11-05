@@ -35,6 +35,62 @@
     store.set(INBOX_KEY, ib);
   }
 
+  /* ---------- 서버 (Supabase): 등록 정보 저장 · 팝업 · 공지 ----------
+     config.js 의 공개용 키로 데이터베이스에 '쓰기'만 한다. 남의 정보 '보기'는 관리자 계정만 가능(데이터베이스 권한 규칙). */
+  var CFG = window.CS_CONFIG || {};
+  var SB_ON = !!(CFG.url && CFG.key);
+  function netErr(m) { var e = new Error(m || 'network'); e.network = true; return e; }
+  function sbReq(path, opt) {
+    opt = opt || {};
+    if (!SB_ON) return Promise.reject(netErr('설정 없음'));
+    var h = { apikey: CFG.key }, k, body = opt.body;
+    for (k in (opt.headers || {})) h[k] = opt.headers[k];
+    if (body != null && !(window.Blob && body instanceof Blob)) { body = JSON.stringify(body); h['Content-Type'] = 'application/json'; }
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, opt.timeout || 20000) : 0;
+    return fetch(CFG.url + path, { method: opt.method || 'GET', headers: h, body: body, signal: ctl ? ctl.signal : undefined }).then(function (r) {
+      clearTimeout(timer);
+      return r.text().then(function (t) {
+        if (!r.ok) { var e = new Error(t || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+        try { return t ? JSON.parse(t) : null; } catch (x) { return null; }
+      });
+    }, function (e) { clearTimeout(timer); throw netErr(e && e.message); });
+  }
+  function uid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
+  var MAX_FILE = 10 * 1024 * 1024;
+  function fileOk(f, label) {
+    if (!f) return true;
+    if (f.size > MAX_FILE) { toast(label + ' 파일은 10MB 이하로 올려 주세요'); return false; }
+    if (f.type && !/^image\//.test(f.type) && f.type !== 'application/pdf') { toast(label + '은(는) 사진이나 PDF만 올릴 수 있어요'); return false; }
+    return true;
+  }
+  function sbUpload(folder, file) {
+    var m = (file.name || '').match(/\.([a-z0-9]{2,5})$/i), ext = m ? m[1].toLowerCase() : 'jpg';
+    var path = folder + '/' + TODAY + '-' + uid() + '.' + ext;
+    return sbReq('/storage/v1/object/uploads/' + path, { method: 'POST', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' } })
+      .then(function () { return path; });
+  }
+  // 등록 정보 저장: 파일을 먼저 올리고 표에 한 줄 추가. 서버에 닿지 못하면(오프라인 · 미리보기) 이 기기에만 남긴다.
+  function saveMember(table, row, uploads) {
+    return Promise.all((uploads || []).map(function (u) {
+      var fs = (u.files || []).filter(Boolean);
+      return fs.length ? Promise.all(fs.map(function (f) { return sbUpload(u.folder, f); })).then(function (ps) { u.set(row, ps); }) : null;
+    })).then(function () {
+      return sbReq('/rest/v1/' + table, { method: 'POST', body: row, headers: { Prefer: 'return=minimal' } });
+    }).then(function () { return 'server'; }, function (e) {
+      if (e && e.network) { inboxAdd(table, row); return 'local'; }
+      throw e;
+    });
+  }
+  function busy(btn, on) {
+    if (!btn) return;
+    if (on) { btn.setAttribute('data-label', btn.textContent); btn.textContent = '보내는 중…'; btn.disabled = true; }
+    else { btn.textContent = btn.getAttribute('data-label') || btn.textContent; btn.disabled = false; }
+  }
+  function saveFail(e) { toast('저장하지 못했어요. 잠시 후 다시 시도해 주세요'); if (window.console) console.warn('[컨택싱어] 저장 실패', e); }
+  function savedWhere(where) { if (where === 'local') toast('서버에 연결하지 못해 이 기기에만 저장했어요'); }
+  var FEAT = {};
+
   /* ---------- 공연 일정 ---------- */
   function scheduleDates(from, n) {
     var ds = [];
@@ -206,7 +262,7 @@
   function profileName(r) { var p = profileOf(r); return p ? (r === 'venue' ? p.venue : p.name) : ''; }
 
   // 프로필 정보 입력 폼 (시작 화면)
-  function setupRoleForm(r, req, agreeId, fill, collect, inbox, done) {
+  function setupRoleForm(r, req, agreeId, fill, collect, remote, done) {
     var form = $('[data-form="' + r + '"]'); if (!form) return;
     $$('[role="group"]', form).forEach(function (g) { (/여러 개/.test(g.textContent.slice(0, 40)) ? multi : single)(g); });
     var p = profileOf(r);
@@ -215,10 +271,13 @@
       e.preventDefault();
       if (!requireFields(form, req)) return;
       if (!agreeOk(agreeId)) return;
+      if (FEAT.signup === false) { toast('지금은 신규 등록을 잠시 쉬고 있어요. 건너뛰고 둘러보세요'); return; }
       var data = collect(); data.at = TODAY;
-      put('profile-' + r, data);
-      if (inbox) inboxAdd(inbox[0], inbox[1](data));
-      done(r);
+      var btn = $('button[type="submit"]', form), rm = remote(data);
+      busy(btn, true);
+      saveMember(rm[0], rm[1]).then(function (where) {
+        put('profile-' + r, data); savedWhere(where); busy(btn, false); done(r);
+      }, function (e) { busy(btn, false); saveFail(e); });
     });
     var skip = $('[data-skip="' + r + '"]', form); if (skip) skip.addEventListener('click', function () { done(r); });
   }
@@ -282,19 +341,19 @@
     $('#pf-back').addEventListener('click', function () { show('pick'); });
     setupRoleForm('fan', ['pf-name'], 'pf-agree', { 'pf-name': 'name', 'pf-phone': 'phone' }, function () {
       return { name: val('pf-name'), phone: val('pf-phone'), genres: picked($('#pf-genres')), area: picked($('#pf-area'))[0] || '' };
-    }, null, startLoad);
+    }, function (d) {
+      return ['fans', { name: d.name, phone: d.phone || null, genres: d.genres, area: d.area || null }];
+    }, startLoad);
     setupRoleForm('venue', ['pv-venue', 'pv-owner', 'pv-phone'], 'pv-agree', { 'pv-venue': 'venue', 'pv-owner': 'owner', 'pv-phone': 'phone', 'pv-area': 'area' }, function () {
       return { venue: val('pv-venue'), owner: val('pv-owner'), phone: val('pv-phone'), area: val('pv-area'), styles: picked($('#pv-styles')), days: picked($('#pv-days')) };
-    }, ['venues', function (d) {
-      return { name: d.venue, owner: d.owner, category: '라이브바', address: d.area, biz: '', cert: false, phone: d.phone, capacity: '', days: d.days, hours: '',
-               styles: d.styles, equipment: [], photos: 0, created: TODAY, status: 'pending' };
-    }], startLoad);
+    }, function (d) {
+      return ['venues', { source: 'quick', venue_name: d.venue, owner_name: d.owner, phone: d.phone, area: d.area || null, styles: d.styles, open_days: d.days }];
+    }, startLoad);
     setupRoleForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-link': 'link' }, function () {
       return { name: val('pa-name'), phone: val('pa-phone'), lineup: picked($('#pa-lineup'))[0] || '', genres: picked($('#pa-genres')), link: val('pa-link') };
-    }, ['artists', function (d) {
-      return { name: d.name, lineup: d.lineup, genres: d.genres, age: '', region: '', phone: d.phone, bio: '', careers: [],
-               tracks: d.link ? [['대표 링크', d.link]] : [], video: '', created: TODAY, status: 'pending' };
-    }], startLoad);
+    }, function (d) {
+      return ['artists', { source: 'quick', name: d.name, phone: d.phone, lineup: d.lineup || null, genres: d.genres, link: d.link || null }];
+    }, startLoad);
     var edit = new URLSearchParams(location.search).get('edit');
     if (edit && ROLE_LABEL[edit]) openInfo(edit);
   };
@@ -686,14 +745,22 @@
       var tracks = [];
       var au = $('#ar-audio').files[0]; if (au) tracks.push([au.name.replace(/\.[^.]+$/, ''), '파일 업로드']);
       if (val('ar-audio-link')) tracks.push(['음원 링크', val('ar-audio-link')]);
-      var vf = $('#ar-video').files[0];
-      inboxAdd('artists', {
-        name: val('ar-name'), lineup: picked($('#ar-lineup'))[0] || '', genres: picked($('#ar-genres')), age: +val('ar-age') || '',
-        region: val('ar-region'), phone: val('ar-phone'), bio: val('ar-bio'), careers: careers, tracks: tracks,
-        video: vf ? '공연 영상 1개 (' + vf.name + ')' : (val('ar-video-link') || ''), created: TODAY, status: 'pending'
-      });
-      put('role', 'artist');
-      openSheet('sheet-done');
+      var vf = $('#ar-video').files[0], photo = $('#ar-photo').files[0];
+      if (!fileOk(photo, '프로필 사진')) return;
+      if (FEAT.signup === false) { toast('지금은 신규 등록을 잠시 쉬고 있어요'); return; }
+      var row = {
+        source: 'detail', name: val('ar-name'), phone: val('ar-phone'), lineup: picked($('#ar-lineup'))[0] || null, genres: picked($('#ar-genres')),
+        link: val('ar-video-link') || val('ar-audio-link') || null,
+        details: { age: +val('ar-age') || null, region: val('ar-region') || null, bio: val('ar-bio') || null, careers: careers,
+                   audio_link: val('ar-audio-link') || null, video_link: val('ar-video-link') || null,
+                   audio_file: au ? au.name : null, video_file: vf ? vf.name : null }
+      };
+      var btn = $('#ar-submit'); busy(btn, true);
+      saveMember('artists', row, [{ folder: 'artist-photo', files: [photo], set: function (r, ps) { r.photo_path = ps[0]; } }]).then(function (where) {
+        busy(btn, false); savedWhere(where);
+        put('role', 'artist'); put('profile-artist', { name: row.name, phone: row.phone, lineup: row.lineup || '', genres: row.genres, link: row.link || '', at: TODAY });
+        openSheet('sheet-done');
+      }, function (e) { busy(btn, false); saveFail(e); });
     });
   };
 
@@ -722,24 +789,121 @@
     $('#vr-submit').addEventListener('click', function () {
       if (!requireFields($('#vr-form'), ['vr-name', 'vr-biz', 'vr-cert', 'vr-phone', 'vr-addr'])) return;
       if (!agreeOk('vr-agree')) return;
-      inboxAdd('venues', {
-        name: val('vr-name'), category: picked($('#vr-cat'))[0] || '', address: (val('vr-addr') + ' ' + val('vr-addr2')).trim(), biz: val('vr-biz'),
-        cert: false, phone: val('vr-phone'), capacity: +val('vr-cap') || '', days: picked($('#vr-days')), hours: val('vr-time'),
-        styles: picked($('#vr-styles')), pay: picked($('#vr-pay'))[0] || '', mood: val('vr-mood'), equipment: picked($('#vr-gear')),
-        photos: ($('#vr-photos').files || []).length, created: TODAY, status: 'pending'
-      });
-      put('role', 'venue');
-      openSheet('sheet-done');
+      var cert = $('#vr-cert').files[0], photos = Array.prototype.slice.call($('#vr-photos').files || []).slice(0, 10);
+      if (!fileOk(cert, '사업자등록증')) return;
+      for (var i = 0; i < photos.length; i++) if (!fileOk(photos[i], '매장 사진')) return;
+      if (FEAT.signup === false) { toast('지금은 신규 등록을 잠시 쉬고 있어요'); return; }
+      var pv = profileOf('venue') || {};
+      var row = {
+        source: 'detail', venue_name: val('vr-name'), owner_name: pv.owner || null, phone: val('vr-phone'),
+        area: (val('vr-addr') + ' ' + val('vr-addr2')).trim() || null, styles: picked($('#vr-styles')), open_days: picked($('#vr-days')),
+        details: { category: picked($('#vr-cat'))[0] || null, biz_no: val('vr-biz'), capacity: +val('vr-cap') || null, hours: val('vr-time') || null,
+                   pay: picked($('#vr-pay'))[0] || null, mood: val('vr-mood') || null, equipment: picked($('#vr-gear')) }
+      };
+      var btn = $('#vr-submit'); busy(btn, true);
+      saveMember('venues', row, [
+        { folder: 'venue-cert', files: [cert], set: function (r, ps) { r.cert_path = ps[0]; } },
+        { folder: 'venue-photo', files: photos, set: function (r, ps) { r.photo_paths = ps; } }
+      ]).then(function (where) {
+        busy(btn, false); savedWhere(where);
+        put('role', 'venue');
+        openSheet('sheet-done');
+      }, function (e) { busy(btn, false); saveFail(e); });
     });
   };
 
   PAGES.about = function () { };
+
+  /* ---------- 관리자 사이트에서 정한 공지 · 점검 · 기능 · 팝업 ---------- */
+  var FEAT_PAGES = { booking: ['booking.html'], tip: ['tip.html'], feed: ['feed.html'], clip: ['clip.html'], match: ['match.html', 'venue-match.html'] };
+  var IS_MAINT = false;
+  function safeLink(u) { u = String(u || '').trim(); return /^(https?:\/\/|[a-z0-9-]+\.html([?#].*)?$)/i.test(u) ? u : ''; }
+  function blockScreen(title, msg, home) {
+    var old = $('#cs-block'); if (old) old.remove();
+    var d = document.createElement('div');
+    d.className = 'cs-block'; d.id = 'cs-block'; d.setAttribute('role', 'alertdialog'); d.setAttribute('aria-modal', 'true'); d.setAttribute('aria-labelledby', 'cs-block-t');
+    d.innerHTML = '<span class="mark-badge lg" aria-hidden="true"></span><h2 id="cs-block-t"></h2><p></p>' + (home ? '<a class="btn" href="home.html">홈으로</a>' : '');
+    var badge = $('.mark-badge'); if (badge) $('.mark-badge', d).innerHTML = badge.innerHTML;
+    $('h2', d).textContent = title; $('p', d).textContent = msg;
+    document.body.appendChild(d);
+  }
+  function applySettings(rows) {
+    var s = {}; (rows || []).forEach(function (r) { s[r.key] = r.value || {}; });
+    var m = s.maintenance || {};
+    if (m.on) { IS_MAINT = true; blockScreen('잠시 점검 중이에요', m.message || '곧 다시 만나요!', false); return; }
+    FEAT = s.features || {};
+    var here = location.pathname.split('/').pop() || 'index.html';
+    Object.keys(FEAT_PAGES).forEach(function (k) {
+      if (FEAT[k] !== false) return;
+      FEAT_PAGES[k].forEach(function (f) {
+        $$('a[href^="' + f + '"]').forEach(function (a) {
+          var li = a.closest('.screens li'); if (li) { li.hidden = true; return; }
+          if (a.closest('.igrid, .cattabs, .tabbar')) a.hidden = true;
+        });
+        if (here === f) blockScreen('이 기능은 잠시 쉬고 있어요', '곧 다시 열게요. 홈에서 다른 기능을 둘러보세요.', true);
+      });
+    });
+    $$('.tabbar').forEach(function (tb) { tb.style.setProperty('--tabs', $$('a', tb).filter(function (a) { return !a.hidden; }).length); });
+    if (FEAT.signup === false) $$('[data-form] button[type="submit"], #ar-submit, #vr-submit').forEach(function (b) { b.disabled = true; b.textContent = '지금은 신규 등록을 잠시 쉬고 있어요'; });
+    var n = s.notice || {};
+    if (n.on && n.text && page !== 'intro' && page !== 'clip') showNotice(n);
+  }
+  function showNotice(n) {
+    var key = String(n.text).slice(0, 80), hid = store.get('csm-notice-hide', '');
+    var main = $('#main'); if (!main || hid === key || $('#cs-notice')) return;
+    var bar = document.createElement('div'), link = safeLink(n.link);
+    bar.className = 'notice-bar'; bar.id = 'cs-notice'; bar.setAttribute('role', 'status');
+    bar.innerHTML = '<span class="nb-ic" aria-hidden="true">공지</span>' + (link ? '<a class="nb-t"></a>' : '<span class="nb-t"></span>') + '<button type="button" class="nb-x" aria-label="공지 닫기">&times;</button>';
+    var t = $('.nb-t', bar); t.textContent = n.text; if (link) t.setAttribute('href', link);
+    $('.nb-x', bar).addEventListener('click', function () { store.set('csm-notice-hide', key); bar.remove(); });
+    main.insertBefore(bar, main.firstChild);
+  }
+  function popClosed() { try { return JSON.parse(sessionStorage.getItem('csm-pop-closed') || '{}'); } catch (e) { return {}; } }
+  function showPopup(list) {
+    if (IS_MAINT || !list || !list.length || $('#cs-pop')) return;
+    var role = st('role', ''), place = page === 'intro' ? 'start' : 'home', hide = store.get('csm-popup-hide', {}) || {}, closed = popClosed();
+    var p = list.filter(function (x) {
+      return (x.target === 'all' || x.target === role) && (x.place === 'all' || x.place === place) && hide[x.id] !== TODAY && !closed[x.id];
+    })[0];
+    if (!p) return;
+    var bg = document.createElement('div'), img = /^https:\/\//.test(p.image_url || '') ? p.image_url : '', link = safeLink(p.link_url);
+    bg.className = 'pop-bg'; bg.id = 'cs-pop';
+    bg.innerHTML = '<div class="pop" role="dialog" aria-modal="true" aria-labelledby="cs-pop-t">' + (img ? '<img class="pop-img" alt="">' : '') +
+      '<div class="pop-body"><h2 id="cs-pop-t"></h2><p class="pop-text"></p>' + (link ? '<a class="btn block pop-link"></a>' : '') + '</div>' +
+      '<div class="pop-foot"><button type="button" data-k="today">오늘 하루 보지 않기</button><button type="button" data-k="close">닫기</button></div></div>';
+    if (img) $('.pop-img', bg).src = img;
+    $('#cs-pop-t', bg).textContent = p.title; $('.pop-text', bg).textContent = p.body || '';
+    if (!p.body) $('.pop-text', bg).hidden = true;
+    if (link) { var a = $('.pop-link', bg); a.textContent = p.link_label || '자세히 보기'; a.href = link; if (/^https?:/.test(link)) { a.target = '_blank'; a.rel = 'noopener'; } }
+    var prev = document.activeElement;
+    function close(today) {
+      if (today) { hide[p.id] = TODAY; store.set('csm-popup-hide', hide); }
+      closed[p.id] = 1; try { sessionStorage.setItem('csm-pop-closed', JSON.stringify(closed)); } catch (e) { /* 저장 불가 */ }
+      bg.remove(); document.removeEventListener('keydown', esc1); if (prev && prev.focus) prev.focus();
+    }
+    function esc1(e) { if (e.key === 'Escape') close(false); }
+    $('[data-k="today"]', bg).addEventListener('click', function () { close(true); });
+    $('[data-k="close"]', bg).addEventListener('click', function () { close(false); });
+    bg.addEventListener('click', function (e) { if (e.target === bg) close(false); });
+    document.addEventListener('keydown', esc1);
+    document.body.appendChild(bg);
+    $('[data-k="close"]', bg).focus();
+  }
+  function loadRemote() {
+    if (!SB_ON) return;
+    var settings = sbReq('/rest/v1/app_settings?select=key,value').then(applySettings, function () { /* 서버 연결 불가: 기본 화면 유지 */ });
+    if (page === 'intro' || page === 'home') {
+      var pops = sbReq('/rest/v1/popups?select=id,title,body,image_url,link_url,link_label,target,place&order=sort.asc,created_at.desc');
+      Promise.all([settings, pops]).then(function (r) { showPopup(r[1]); }, function () { /* 팝업 없음 */ });
+    }
+  }
 
   // 첫 화면: 연락 · 접촉 · 교제를 고르면 연결 그림과 설명 카드가 함께 바뀐다
   /* ---------- 실행 ---------- */
   var page = document.body.getAttribute('data-page');
   if (PAGES[page]) PAGES[page]();
   autoVideos();
+  loadRemote();
   // 화면 지도의 '오늘' 공연 줄
   var tl = $('[data-bind="tonight"]');
   if (tl) { var ns = nextShow(); tl.textContent = ns ? (ns.d === TODAY ? '오늘 ' : dayLabel(ns.d) + ' ') + ns.t + ' · ' + who(ns) : '다음 일정 준비 중'; }

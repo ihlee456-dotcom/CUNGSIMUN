@@ -46,7 +46,7 @@
 <header class="top"><a class="icon-btn" href="home.html" data-back aria-label="뒤로"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m14.5 5.5-6.5 6.5 6.5 6.5"/></svg></a><h1 style="flex:1;margin:0;font-size:17px;font-weight:700">매장 등록</h1><span class="aside">공연장 사장님</span></header>
 <main id="main" class="main no-tab">
 
-<p class="note">시안 화면이에요. 입력한 내용은 <b>이 기기의 브라우저에만</b> 저장되고 어디에도 전송되지 않아요. 실제 사업자 정보 대신 예시 값을 넣어 주세요.</p>
+<p class="note">입력한 정보와 사업자등록증 · 매장 사진은 <b>컨택싱어 운영팀에게만</b> 전달되고 공개되지 않아요. 파일은 한 개당 10MB까지 올릴 수 있어요.</p>
 <form class="form" id="vr-form" aria-label="매장 등록" novalidate onsubmit="return false">
   <fieldset class="fs"><h2><span class="n">1</span>사업자 정보</h2>
     <div class="field"><label class="lbl" for="vr-name">상호 <span class="req">*</span></label><input class="in-text" id="vr-name" type="text" placeholder="예: 행2PM8PM" required aria-required="true"><p class="err" id="vr-name-err" hidden>상호를 입력해 주세요</p></div>
@@ -89,8 +89,9 @@
 </div>
 </div>
 
-<div class="sheet-bg" id="sheet-done" hidden><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-done-t"><span class="ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><h2 id="sheet-done-t">매장 등록 신청 완료!</h2><p>사업자등록증 확인 후 승인되면 알림을 보내드려요. 승인 전에도 AI 추천 싱어를 미리 둘러볼 수 있어요.</p><p class="tiny">시안이라 실제로 전송되지 않고, 이 기기의 관리자 화면 시안에서만 보여요.</p><a class="btn block" href="venue-match.html">AI 추천 싱어 보기</a><a class="btn ghost block" href="partner.html">파트너 센터 둘러보기</a></div></div>
+<div class="sheet-bg" id="sheet-done" hidden><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-done-t"><span class="ok"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span><h2 id="sheet-done-t">매장 등록 신청 완료!</h2><p>사업자등록증 확인 후 승인되면 알림을 보내드려요. 승인 전에도 AI 추천 싱어를 미리 둘러볼 수 있어요.</p><p class="tiny">운영팀이 확인한 뒤 남겨 주신 연락처로 연락드려요.</p><a class="btn block" href="venue-match.html">AI 추천 싱어 보기</a><a class="btn ghost block" href="partner.html">파트너 센터 둘러보기</a></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<script src="config.js"></script>
 <script src="data.js"></script>
 <script src="app.js"></script>
 </body>
