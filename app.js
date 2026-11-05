@@ -206,13 +206,43 @@
     var role = (q === 'fan' || q === 'artist' || q === 'venue') ? q : st('role', 'fan');
     function setRole(r) {
       role = r;
-      $$('.role').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-role') === r ? 'true' : 'false'); });
+      $$('[data-role]').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-role') === r ? 'true' : 'false'); });
       $$('[data-for-role]').forEach(function (s) { s.hidden = s.getAttribute('data-for-role') !== r; });
     }
-    $$('.role').forEach(function (b) { b.addEventListener('click', function () { setRole(b.getAttribute('data-role')); put('role', role); }); });
+    $$('[data-role]').forEach(function (b) { b.addEventListener('click', function () { setRole(b.getAttribute('data-role')); put('role', role); }); });
+    // 배너: 넘길 때 몇 번째인지 표시
+    var track = $('#bnr'), idx = $('#bnr-i');
+    if (track && idx) track.addEventListener('scroll', function () {
+      var w = track.firstElementChild ? track.firstElementChild.getBoundingClientRect().width + 10 : 1;
+      idx.textContent = Math.min(track.children.length, Math.round(track.scrollLeft / w) + 1);
+    }, { passive: true });
+    // 검색: 싱어 이름으로 다음 공연 찾기
+    var form = $('#search');
+    if (form) form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var q = $('#q').value.trim().replace(/\s+/g, '').toLowerCase(); if (!q) return;
+      var hit = D.shows.filter(function (s) { return s.d >= TODAY && s.a && s.a.replace(/\s+/g, '').toLowerCase().indexOf(q) >= 0; })
+        .sort(function (x, y) { return (x.d + x.t) < (y.d + y.t) ? -1 : 1; })[0];
+      if (hit) location.href = 'schedule.html#d-' + hit.d;
+      else toast('‘' + $('#q').value.trim() + '’ 님의 다가오는 공연을 찾지 못했어요');
+    });
     setRole(role);
     board($('#board'));
     bindFan();
+    // 첫 방문 소개 팝업: 세션마다 한 번, '오늘 하루 보지 않기'면 오늘은 생략, #intro 로 오면 항상
+    var pop = document.getElementById('intro-pop');
+    if (pop) {
+      var ss = function (k, v) { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) { return null; } };
+      var showIntro = function () { openSheet('intro-pop'); ss('csm-intro-seen', '1'); };
+      var clearHash = function () { if (location.hash === '#intro') { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* 무시 */ } } };
+      if (location.hash === '#intro') showIntro();
+      else if (store.get('csm-intro-hide', '') !== TODAY && !ss('csm-intro-seen')) showIntro();
+      window.addEventListener('hashchange', function () { if (location.hash === '#intro') showIntro(); });
+      $$('[data-close]', pop).forEach(function (b) { b.addEventListener('click', clearHash); });
+      pop.addEventListener('click', function (e) { if (e.target === pop) clearHash(); });
+      var hide = document.getElementById('intro-hide');
+      if (hide) hide.addEventListener('click', function () { store.set('csm-intro-hide', TODAY); clearHash(); closeSheet(pop); });
+    }
     // 내 예약
     var mine = (store.get(BOOK_KEY, []) || []).filter(function (b) { return b.d >= TODAY; });
     var box = $('#my-bookings');
@@ -441,7 +471,7 @@
       var html = '';
       for (var i = 0; i < 7; i++) {
         var d = addDays(TODAY, i), l = showsOn(d);
-        var left = '<span style="flex:none;width:58px;display:flex;flex-direction:column;gap:1px"><span class="mono" style="font-size:13px;font-weight:700;color:' + (l.length ? 'var(--accent)' : 'var(--coral)') + '">' + md(d) + '</span><span class="tiny" style="font-size:11px">' + (i === 0 ? '오늘' : wd(d)) + (l[0] && l[0].t ? ' ' + l[0].t : '') + '</span></span>';
+        var left = '<span style="flex:none;width:58px;display:flex;flex-direction:column;gap:1px"><span class="mono" style="font-size:13px;font-weight:700;color:' + (l.length ? 'var(--accent-text)' : '#B42318') + '">' + md(d) + '</span><span class="tiny" style="font-size:11px">' + (i === 0 ? '오늘' : wd(d)) + (l[0] && l[0].t ? ' ' + l[0].t : '') + '</span></span>';
         if (!l.length) html += '<li>' + left + '<span class="t"><b style="color:var(--muted)">컨택 필요</b></span><a class="btn sm" href="venue-match.html">AI 추천 보기</a></li>';
         else if (l[0].type === 'rental') html += '<li>' + left + '<span class="t"><b>대관</b><span>일반 공연 없음</span></span></li>';
         else {

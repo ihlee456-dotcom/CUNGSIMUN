@@ -5,25 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>컨택싱어 관리자</title>
 <meta name="robots" content="noindex, nofollow, noarchive">
-<meta name="theme-color" content="#15130F">
+<meta name="theme-color" content="#FFFFFF">
 <link rel="icon" href="favicon.ico" sizes="any">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <style>
-/* 레이아웃: 왼쪽 메뉴 + 오른쪽 작업 영역(넓은 화면), 좁은 화면은 위쪽 가로 메뉴. 메인 사이트와 같은 다크 토큰 */
+/* 레이아웃: 왼쪽 메뉴 + 오른쪽 작업 영역(넓은 화면), 좁은 화면은 위쪽 가로 메뉴. 메인 사이트와 같은 라이트 토큰 */
 :root{
-  --bg:#15130F; --surface:#211E19; --surface-2:#1A1814; --line:#33302A; --line-2:#4A453C;
-  --fg:#F4EFE4; --fg-2:#D8D1C4; --muted:#A39C8E;
-  --accent:#F5D547; --accent-ink:#15130F; --accent-soft:#2A2619; --coral:#FF6A3D; --coral-soft:#3A2219; --ok:#A6D98C; --ok-soft:#1F2A1A;
-  --display:'Black Han Sans','IBM Plex Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
-  --body:'IBM Plex Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
-  --mono:'Space Mono',ui-monospace,Menlo,monospace;
-  color-scheme:dark;
+  --bg:#FFFFFF; --surface:#F5F5F7; --surface-2:#FAFAFB; --line:#EFEFF2; --line-2:#E4E4E9;
+  --fg:#1A1A1E; --fg-2:#4B4B53; --muted:#6F6F78;
+  --accent:#D2461C; --accent-ink:#FFFFFF; --accent-soft:#FFF1EC; --coral:#6D4EF0; --coral-soft:#F1EEFF; --ok:#1F8A4C; --ok-soft:#EAF7EF;
+  --display:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  --body:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --mono:'Pretendard Variable',Pretendard,-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  color-scheme:light;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--body);-webkit-font-smoothing:antialiased;word-break:keep-all}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 var(--body);-webkit-font-smoothing:antialiased;word-break:keep-all}
 h1,h2,h3{margin:0;line-height:1.3}
 p{margin:0}
 a{color:var(--accent)}
@@ -35,7 +34,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
 .side{position:sticky;top:0;height:100vh;padding:22px 14px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:22px;background:var(--surface-2)}
 .brand{display:flex;flex-direction:column;gap:4px;padding:0 8px}
-.brand b{font:400 26px/1 var(--display);color:var(--accent)}
+.brand b{font:800 19px/1 var(--display);letter-spacing:-.5px;color:var(--fg)}
 .brand span{font-size:12px;color:var(--muted)}
 .menu{display:flex;flex-direction:column;gap:2px}
 .menu button{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 12px;border:0;border-radius:10px;background:transparent;color:var(--fg-2);text-align:left;cursor:pointer;font-weight:500}
@@ -50,7 +49,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .demo b{color:var(--accent)}
 .demo button{margin-left:auto}
 .head{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:20px}
-.head h1{font:400 30px/1.2 var(--display)}
+.head h1{font:700 22px/1.3 var(--display);letter-spacing:-.6px}
 .head p{color:var(--muted);font-size:14px;margin-top:4px}
 
 @media (max-width:900px){
@@ -109,10 +108,10 @@ td.right,th.right{text-align:right}
 .pill.ok{background:var(--ok-soft);color:var(--ok)}
 .pill.wait{border:1px dashed var(--line-2);color:var(--muted)}
 
-.drawer-bg{position:fixed;inset:0;z-index:30;background:rgba(10,9,7,.6)}
+.drawer-bg{position:fixed;inset:0;z-index:30;background:rgba(20,20,24,.45)}
 .drawer{position:fixed;top:0;right:0;bottom:0;z-index:31;width:min(460px,100%);overflow:auto;background:var(--surface);border-left:1px solid var(--line);padding:22px 22px calc(28px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px}
 .drawer .bar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
-.drawer h2{font:400 26px/1.25 var(--display)}
+.drawer h2{font:700 19px/1.3 var(--display);letter-spacing:-.5px}
 .kv{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 12px;margin:0;font-size:14px}
 .kv dt{color:var(--muted)}
 .kv dd{margin:0;white-space:pre-line;overflow-wrap:anywhere}
