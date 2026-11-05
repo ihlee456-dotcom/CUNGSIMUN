@@ -56,7 +56,89 @@
       });
     }, function (e) { clearTimeout(timer); throw netErr(e && e.message); });
   }
-  function uid() { return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12); }
+  function uid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    var b = new Uint8Array(16), i;
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(b); else for (i = 0; i < 16; i++) b[i] = Math.random() * 256 | 0;
+    b[6] = b[6] & 15 | 64; b[8] = b[8] & 63 | 128;
+    var h = Array.prototype.map.call(b, function (x) { return (x + 256).toString(16).slice(1); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  }
+  function sbRpc(fn, args) { return sbReq('/rest/v1/rpc/' + fn, { method: 'POST', body: args || {} }); }
+  var TABLE_OF = { venue: 'venues', artist: 'artists', fan: 'fans' };
+  // 이 기기에서 등록한 회원 (등록할 때 만든 번호 + 비밀 번호). 서버는 이 둘이 맞을 때만 내 컨택 · 상태를 보여 준다.
+  function member(kind) { var m = st('member-' + kind, null); return m && m.id && m.token ? m : null; }
+  /* ---------- 카카오 로그인 (Supabase Auth 의 카카오 연결) ---------- */
+  var AUTH_KEY = 'csm-auth', AUTH = {};
+  function session() { var a = store.get(AUTH_KEY, null); return a && a.access ? a : null; }
+  function authToken() {
+    var a = session(); if (!a) return Promise.resolve(null);
+    if (a.exp - 60000 > Date.now()) return Promise.resolve(a.access);
+    return fetch(CFG.url + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', headers: { apikey: CFG.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: a.refresh }) })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('refresh')); })
+      .then(function (j) { a.access = j.access_token; a.refresh = j.refresh_token; a.exp = Date.now() + (j.expires_in || 3600) * 1000; store.set(AUTH_KEY, a); return a.access; },
+            function () { store.set(AUTH_KEY, null); return null; });
+  }
+  function sbAuth(path, opt) {
+    return authToken().then(function (tok) {
+      if (!tok) { var e = new Error('로그인이 필요해요'); e.auth = true; throw e; }
+      opt = opt || {}; var h = {}, k; for (k in (opt.headers || {})) h[k] = opt.headers[k]; h.Authorization = 'Bearer ' + tok; opt.headers = h;
+      return sbReq(path, opt);
+    });
+  }
+  function kakaoStart(role, back) {
+    store.set('csm-kakao-intent', { role: role || '', back: back || '', at: Date.now() });
+    var base = location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
+    var sc = (AUTH.kakao_scopes || []).filter(function (x) { return /^[a-z_]+$/.test(x); }).join(',');
+    location.href = CFG.url + '/auth/v1/authorize?provider=kakao&redirect_to=' + encodeURIComponent(base + 'index.html') + (sc ? '&scopes=' + encodeURIComponent(sc) : '');
+  }
+  // 카카오에서 돌아오면 주소 끝(#)에 로그인 정보가 붙어 온다
+  function takeAuthHash() {
+    var h = location.hash.slice(1);
+    if (!/(^|&)(access_token|error)=/.test(h)) return false;
+    var q = new URLSearchParams(h);
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+    if (q.get('error')) { setTimeout(function () { toast('카카오 로그인을 마치지 못했어요. 다시 시도해 주세요'); }, 300); return false; }
+    store.set(AUTH_KEY, { access: q.get('access_token'), refresh: q.get('refresh_token'), exp: Date.now() + (+q.get('expires_in') || 3600) * 1000, provider: q.get('provider_token') || '' });
+    return true;
+  }
+  function phoneKR(p) { p = String(p || '').replace(/^\+82\s?/, '0').replace(/[^0-9]/g, ''); return p.length >= 10 ? p.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3') : ''; }
+  // 로그인 직후: 내 계정 · 카카오 프로필(이름 · 전화번호) · 내 회원 정보 불러오기
+  function afterKakao() {
+    var a = session();
+    var me = sbAuth('/auth/v1/user', {}).catch(function () { return null; });
+    var kp = a && a.provider ? fetch('https://kapi.kakao.com/v2/user/me', { headers: { Authorization: 'Bearer ' + a.provider } })
+      .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }) : Promise.resolve(null);
+    return Promise.all([me, kp]).then(function (r) {
+      var u = r[0] || {}, k = (r[1] && r[1].kakao_account) || {}, md = u.user_metadata || {}, prof = k.profile || {};
+      var p = { uid: u.id || '', nickname: prof.nickname || md.name || md.full_name || '', name: k.name || '', phone: phoneKR(k.phone_number),
+                email: k.email || u.email || '', avatar: prof.profile_image_url || md.avatar_url || '' };
+      var a2 = session(); if (a2) { a2.uid = p.uid; a2.provider = ''; store.set(AUTH_KEY, a2); }   // 카카오 토큰은 바로 버린다
+      put('kakao', p);
+      // 이 기기에서 먼저 등록한 정보는 카카오 계정에 연결
+      return Promise.all(['venue', 'artist', 'fan'].map(function (kind) {
+        var m = member(kind); if (!m) return null;
+        return sbAuth('/rest/v1/rpc/link_member', { method: 'POST', body: { p_kind: kind, p_id: m.id, p_token: m.token, p_email: p.email || null, p_avatar: p.avatar || null } }).catch(function () { return null; });
+      })).then(function () { return sbAuth('/rest/v1/rpc/my_members', { method: 'POST', body: {} }).catch(function () { return []; }); })
+        .then(function (rows) {
+          var seen = {};
+          (rows || []).forEach(function (x) {
+            if (seen[x.kind]) return; seen[x.kind] = x;
+            put('member-' + x.kind, { id: x.id, token: x.member_token });
+            if (!profileOf(x.kind)) put('profile-' + x.kind, x.kind === 'venue' ? { venue: x.name, owner: p.name || p.nickname, phone: p.phone, at: TODAY } : { name: x.name, phone: p.phone, genres: [], at: TODAY });
+          });
+          return { profile: p, mine: seen };
+        });
+    });
+  }
+  function kakaoLogout() {
+    var a = session();
+    if (a) fetch(CFG.url + '/auth/v1/logout', { method: 'POST', headers: { apikey: CFG.key, Authorization: 'Bearer ' + a.access } }).catch(function () {});
+    store.set(AUTH_KEY, null);
+    ['kakao', 'member-venue', 'member-artist', 'member-fan', 'profile-venue', 'profile-artist', 'profile-fan', 'role'].forEach(function (k) { put(k, null); });
+    toast('로그아웃했어요'); setTimeout(function () { location.replace('index.html'); }, 600);
+  }
+  function errMsg(e, fallback) { var m = (e && e.message) || ''; try { var j = JSON.parse(m); m = j.message || m; } catch (x) { /* 글자 그대로 */ } return /[가-힣]/.test(m) ? m : fallback; }
   var MAX_FILE = 10 * 1024 * 1024;
   function fileOk(f, label) {
     if (!f) return true;
@@ -71,13 +153,32 @@
       .then(function () { return path; });
   }
   // 등록 정보 저장: 파일을 먼저 올리고 표에 한 줄 추가. 서버에 닿지 못하면(오프라인 · 미리보기) 이 기기에만 남긴다.
-  function saveMember(table, row, uploads) {
+  function saveMember(kind, row, uploads) {
+    var table = TABLE_OF[kind], mem = member(kind);
+    function insertNew() {
+      var id = uid(), token = uid(), r = {}, k;
+      for (k in row) r[k] = row[k];
+      r.id = id; r.member_token = token;
+      var a = session(), kp = st('kakao', null);
+      function plain() { return sbReq('/rest/v1/' + table, { method: 'POST', body: r, headers: { Prefer: 'return=minimal' } }); }
+      var send = plain;
+      if (a && a.uid) {
+        send = function () {
+          var ra = {}, kk; for (kk in r) ra[kk] = r[kk];
+          ra.user_id = a.uid; if (kp && kp.email) ra.email = kp.email; if (kp && kp.avatar) ra.avatar_url = kp.avatar;
+          return sbAuth('/rest/v1/' + table, { method: 'POST', body: ra, headers: { Prefer: 'return=minimal' } }).catch(function (e) { if (e && e.auth) return plain(); throw e; });
+        };
+      }
+      return send().then(function () { put('member-' + kind, { id: id, token: token }); return 'server'; });
+    }
     return Promise.all((uploads || []).map(function (u) {
       var fs = (u.files || []).filter(Boolean);
       return fs.length ? Promise.all(fs.map(function (f) { return sbUpload(u.folder, f); })).then(function (ps) { u.set(row, ps); }) : null;
     })).then(function () {
-      return sbReq('/rest/v1/' + table, { method: 'POST', body: row, headers: { Prefer: 'return=minimal' } });
-    }).then(function () { return 'server'; }, function (e) {
+      // 이 기기에서 이미 등록했으면 새 줄을 만들지 않고 고친다
+      if (mem) return sbRpc('member_update', { p_kind: kind, p_id: mem.id, p_token: mem.token, p_data: row }).then(function (ok) { return ok === true ? 'server' : insertNew(); });
+      return insertNew();
+    }).then(function (w) { return w; }, function (e) {
       if (e && e.network) { inboxAdd(table, row); return 'local'; }
       throw e;
     });
@@ -299,6 +400,7 @@
   PAGES.intro = function () {
     var pick = $('#step-pick'), info = $('#step-info'), load = $('#step-load');
     if (!pick) return;
+    var fromKakao = takeAuthHash();
     ['venue', 'fan', 'artist'].forEach(function (r) { var el = $('[data-pname="' + r + '"]'); if (el) el.textContent = profileName(r); });
     var hv = $('#pf-video'), hb = $('#pf-vbtn'), userPaused = REDUCED;
     function drawHb() { if (!hb) return; var off = hv.paused; hb.setAttribute('aria-pressed', off ? 'true' : 'false'); hb.setAttribute('aria-label', off ? '영상 재생' : '영상 멈추기'); $('.i-pause', hb).hidden = off; $('.i-play', hb).hidden = !off; }
@@ -338,21 +440,68 @@
     $$('[data-pick]').forEach(function (b) {
       b.addEventListener('click', function () { var r = b.getAttribute('data-pick'); if (profileOf(r)) startLoad(r); else openInfo(r); });
     });
+    // 카카오로 가입: 받은 정보로 바로 가입하고, 꼭 필요한데 비어 있는 칸만 묻는다
+    function kakaoNote(r, msg) { var n = $('#info-' + r + ' [data-kakao-note]'); if (n) { n.hidden = false; n.textContent = msg; } }
+    function autoJoin(r, p, back) {
+      var nick = p.nickname || p.name || '';
+      function finish() { if (back) location.replace(back); else startLoad(r); }
+      if (r === 'fan' && nick) {
+        var row = { name: nick.slice(0, 40), phone: p.phone || null, genres: [], area: null };
+        return saveMember('fan', row).then(function () {
+          put('profile-fan', { name: row.name, phone: p.phone || '', genres: [], area: '', at: TODAY });
+          toast('카카오 정보로 가입했어요'); finish();
+        }, function (e) { saveFail(e); openInfo('fan'); });
+      }
+      if (r === 'artist' && nick && p.phone) {
+        var ar = { source: 'quick', name: nick.slice(0, 60), phone: p.phone, genres: [] };
+        return saveMember('artist', ar).then(function () {
+          put('profile-artist', { name: ar.name, phone: p.phone, lineup: '', genres: [], link: '', at: TODAY });
+          toast('카카오 정보로 가입했어요 · 장르 · 편성은 정보 수정에서 더해 주세요'); finish();
+        }, function (e) { saveFail(e); openInfo('artist'); });
+      }
+      // 사장님(매장 이름이 꼭 필요) 또는 연락처가 없는 경우: 받은 정보를 채운 입력 화면으로
+      var fill = { venue: { 'pv-owner': p.name || nick, 'pv-phone': p.phone }, artist: { 'pa-name': nick, 'pa-phone': p.phone }, fan: { 'pf-name': nick, 'pf-phone': p.phone } }[r] || {};
+      Object.keys(fill).forEach(function (id) { var el = document.getElementById(id); if (el && fill[id] && !el.value) el.value = fill[id]; });
+      openInfo(r);
+      kakaoNote(r, r === 'venue' ? '카카오에서 받은 정보를 채웠어요. 매장 이름만 입력하고 시작하세요.' : '카카오에서 받은 정보를 채웠어요. 비어 있는 칸만 입력해 주세요.');
+      var first = $('#info-' + r + ' input:not([type=checkbox]):placeholder-shown'); if (first) first.focus();
+    }
+    function drawLogin() {
+      var a = session(), p = st('kakao', null);
+      $$('[data-kakao-in]').forEach(function (el) { el.hidden = !a; }); $$('[data-kakao-out]').forEach(function (el) { el.hidden = !!a; });
+      $$('[data-kakao-name]').forEach(function (el) { el.textContent = '카카오 로그인됨' + (p && (p.nickname || p.name) ? ' · ' + (p.nickname || p.name) : ''); });
+    }
+    drawLogin();
+    if (fromKakao) {
+      show('load'); $('#load-name').textContent = '카카오 정보 확인 중'; $('.sp-msg', load).textContent = '카카오 로그인 중';
+      afterKakao().then(function (res) {
+        var intent = store.get('csm-kakao-intent', null) || {}; store.set('csm-kakao-intent', null);
+        var r = ROLE_LABEL[intent.role] ? intent.role : '', back = /^[a-z-]+\.html$/.test(intent.back || '') ? intent.back : '';
+        $('.sp-msg', load).textContent = '정보 받는 중';
+        ['venue', 'fan', 'artist'].forEach(function (k) { var el = $('[data-pname="' + k + '"]'); if (el) el.textContent = profileName(k); });
+        drawLogin(); show('pick');
+        if (r && res.mine[r]) { if (back) location.replace(back); else startLoad(r); return; }
+        if (r) { autoJoin(r, res.profile, back); return; }
+        var kinds = Object.keys(res.mine);
+        if (kinds.length) { if (back) location.replace(back); else startLoad(kinds.indexOf(st('role', '')) >= 0 ? st('role', '') : kinds[0]); return; }
+        toast('처음이시네요! 어떤 역할로 시작할지 골라 주세요');
+      }, function () { show('pick'); toast('카카오 정보를 불러오지 못했어요. 다시 시도해 주세요'); });
+    }
     $('#pf-back').addEventListener('click', function () { show('pick'); });
     setupRoleForm('fan', ['pf-name'], 'pf-agree', { 'pf-name': 'name', 'pf-phone': 'phone' }, function () {
       return { name: val('pf-name'), phone: val('pf-phone'), genres: picked($('#pf-genres')), area: picked($('#pf-area'))[0] || '' };
     }, function (d) {
-      return ['fans', { name: d.name, phone: d.phone || null, genres: d.genres, area: d.area || null }];
+      return ['fan', { name: d.name, phone: d.phone || null, genres: d.genres, area: d.area || null }];
     }, startLoad);
     setupRoleForm('venue', ['pv-venue', 'pv-owner', 'pv-phone'], 'pv-agree', { 'pv-venue': 'venue', 'pv-owner': 'owner', 'pv-phone': 'phone', 'pv-area': 'area' }, function () {
       return { venue: val('pv-venue'), owner: val('pv-owner'), phone: val('pv-phone'), area: val('pv-area'), styles: picked($('#pv-styles')), days: picked($('#pv-days')) };
     }, function (d) {
-      return ['venues', { source: 'quick', venue_name: d.venue, owner_name: d.owner, phone: d.phone, area: d.area || null, styles: d.styles, open_days: d.days }];
+      return ['venue', { source: 'quick', venue_name: d.venue, owner_name: d.owner, phone: d.phone, area: d.area || null, styles: d.styles, open_days: d.days }];
     }, startLoad);
     setupRoleForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-link': 'link' }, function () {
       return { name: val('pa-name'), phone: val('pa-phone'), lineup: picked($('#pa-lineup'))[0] || '', genres: picked($('#pa-genres')), link: val('pa-link') };
     }, function (d) {
-      return ['artists', { source: 'quick', name: d.name, phone: d.phone, lineup: d.lineup || null, genres: d.genres, link: d.link || null }];
+      return ['artist', { source: 'quick', name: d.name, phone: d.phone, lineup: d.lineup || null, genres: d.genres, link: d.link || null }];
     }, startLoad);
     var edit = new URLSearchParams(location.search).get('edit');
     if (edit && ROLE_LABEL[edit]) openInfo(edit);
@@ -382,15 +531,202 @@
     });
     board($('#board'));
     bindFan();
-    var mine = (store.get(BOOK_KEY, []) || []).filter(function (b) { return b.d >= TODAY; });
-    var box = $('#my-bookings');
-    if (box && mine.length) {
-      box.hidden = false;
-      $('ul', box).innerHTML = mine.slice(0, 3).map(function (b) {
-        return '<li><span class="t"><b>' + esc(dayLabel(b.d) + ' ' + b.t + ' · ' + b.a) + '</b><span>행2PM8PM · ' + b.ppl + '명 · 방문하면 직관 인증</span></span><span class="pill yes">예약됨</span></li>';
-      }).join('');
+    drawMyBookings($('#my-bookings'));
+    var view = $('#view-' + role);
+    if (role === 'venue' || role === 'artist') {
+      memberStatus(role, view).then(function (pr) {
+        if (pr && g && !p) g.textContent = role === 'venue' ? pr.name + ' 사장님, 반가워요' : pr.name + '님, 반가워요';
+      });
+      if (role === 'artist') loadPublicList('artist', view);
+      loadInbox(role, view);
     }
   };
+
+  /* ---------- 내 예약 (상태는 서버에서) ---------- */
+  var BSTATUS = { requested: ['신청됨', 'wait'], confirmed: ['예약 확정', 'yes'], declined: ['예약 불가', 'no'], cancelled: ['취소됨', 'done'],
+                  visited: ['방문 완료', 'yes'], noshow: ['노쇼', 'no'], local: ['이 기기에만 저장', 'done'] };
+  function drawMyBookings(box) {
+    if (!box) return;
+    var all = store.get(BOOK_KEY, []) || [];
+    var mine = all.filter(function (b) { return !b.d || b.d >= addDays(TODAY, -1); }).slice(-6).reverse();
+    if (!mine.length) return;
+    function paint() {
+      box.hidden = false;
+      $('ul', box).innerHTML = mine.slice(0, 4).map(function (b) {
+        var stt = BSTATUS[b.status] || ['예약됨', 'yes'];
+        return '<li><span class="t"><b>' + esc((b.d ? dayLabel(b.d) + ' ' : '') + (b.t ? b.t + ' · ' : '') + (b.a || '')) + '</b><span>' + esc('행2PM8PM · ' + b.ppl + '명' + (b.kind === 'rent' ? ' · 대관 견적' : '')) + '</span>' +
+          (b.reply ? '<span style="color:var(--accent-text)">' + esc('매장 답변: ' + b.reply) + '</span>' : '') + '</span><span class="pill ' + stt[1] + '">' + esc(stt[0]) + '</span></li>';
+      }).join('');
+    }
+    paint();
+    var refs = mine.filter(function (b) { return b.ref && b.status !== 'local'; }).map(function (b) { return b.ref; });
+    if (!refs.length || !SB_ON) return;
+    sbRpc('my_bookings', { p_refs: refs }).then(function (rows) {
+      var by = {}; (rows || []).forEach(function (r) { by[r.ref] = r; });
+      all.forEach(function (b) { var r = by[b.ref]; if (r) { b.status = r.status; b.reply = r.reply || ''; } });
+      store.set(BOOK_KEY, all); paint();
+    }, function () { /* 서버 연결 불가: 저장된 상태로 */ });
+  }
+
+  /* ---------- 컨택: 가수 ↔ 라이브바 (보내기 · 받기 · 수락/거절) ---------- */
+  var CSTATUS = { requested: ['답 기다리는 중', 'wait'], accepted: ['수락', 'yes'], declined: ['거절', 'no'], cancelled: ['취소', 'done'] };
+  function demoOff(box, slot) { var d = box.parentNode && box.parentNode.querySelector('[data-demo="' + slot + '"]'); if (d) d.hidden = true; }
+  function memberStatus(kind, root) {
+    var boxes = $$('[data-real="status"]', root || document);
+    function note(html) { boxes.forEach(function (b) { b.hidden = !html; b.innerHTML = html || ''; }); }
+    var m = member(kind);
+    var reg = '<div class="note row" style="gap:10px;align-items:center"><span style="flex:1">' +
+      (kind === 'venue' ? '매장을 등록하면 가수들의 실제 컨택 요청이 여기에 쌓여요.' : '프로필을 등록하면 라이브바와 실제 컨택을 주고받을 수 있어요.') +
+      '</span><a class="btn sm" href="index.html?edit=' + kind + '">등록하기</a></div>';
+    if (!m || !SB_ON) { note(SB_ON ? reg : ''); return Promise.resolve(null); }
+    return sbRpc('my_profile', { p_kind: kind, p_id: m.id, p_token: m.token }).then(function (rows) {
+      var p = rows && rows[0];
+      if (!p) { put('member-' + kind, null); note(reg); return null; }
+      $$('[data-me-name]').forEach(function (el) { el.textContent = el.tagName === 'H1' ? p.name : p.name + ' 파트너'; });
+      var msg = p.status === 'approved' ? '' : p.status === 'rejected' ? '등록이 반려됐어요. 운영팀에 문의해 주세요.'
+        : kind === 'venue' ? '매장 승인 대기 중이에요. 승인되면 가수들에게 매장이 보이고 컨택을 받을 수 있어요.'
+        : '프로필 승인 대기 중이에요. 승인되면 사장님들에게 프로필이 보여요. 승인된 매장에는 지금도 컨택할 수 있어요.';
+      note(msg ? '<p class="note">' + esc(msg) + '</p>' : '');
+      return p;
+    }, function () { note(''); return null; });
+  }
+  function myContacts(kind) {
+    var m = member(kind); if (!m || !SB_ON) return Promise.resolve([]);
+    return sbRpc('my_contacts', { p_kind: kind, p_id: m.id, p_token: m.token }).then(function (r) { return r || []; }, function () { return []; });
+  }
+  function telOf(p) { return String(p || '').replace(/[^0-9+]/g, ''); }
+  function linkOf(u) { u = String(u || '').trim(); return /^https?:\/\//i.test(u) ? u : ''; }
+  function wishText(c) { return [c.wish_date ? dayLabel(c.wish_date) : '', c.wish_time || '', c.pay || ''].filter(Boolean).join(' · ') || '일정 · 조건 협의'; }
+  function publicCard(kind, x, sentId) {
+    // kind = 나 (artist 는 라이브바 목록, venue 는 가수 목록을 본다)
+    var meta = kind === 'artist' ? [x.category, x.area].filter(Boolean).join(' · ') : [x.lineup, (x.genres || []).join(', '), x.region].filter(Boolean).join(' · ');
+    var tags = kind === 'artist' ? (x.styles || []).concat(x.open_days && x.open_days.length ? [x.open_days.join('·') + ' 공연'] : [], x.capacity ? ['최대 ' + x.capacity + '명'] : []) : [];
+    var link = kind === 'venue' ? linkOf(x.link) : '';
+    var name = kind === 'artist' ? x.venue_name : x.name;
+    return '<article class="mcard">' +
+      '<div class="stack" style="gap:3px"><h3>' + esc(name) + '</h3><span class="tiny">' + esc(meta || '컨택싱어 승인 ' + (kind === 'artist' ? '매장' : '가수')) + '</span></div>' +
+      (tags.length ? '<div class="chips">' + tags.map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') + '</div>' : '') +
+      (x.bio ? '<p class="why">' + esc(x.bio) + '</p>' : '') +
+      '<div class="row" style="gap:8px">' + (link ? '<a class="btn ghost sm" href="' + esc(link) + '" target="_blank" rel="noopener">공연 영상 · 음원</a>' : '') +
+      '<button type="button" class="btn ' + (sentId ? 'outline ' : '') + (link ? 'sm' : 'block') + '" style="flex:1" data-contact-to="' + esc(x.id) + '" data-name="' + esc(name) + '"' + (sentId ? ' disabled' : '') + '>' +
+      (sentId ? '컨택 보냄 · 답 기다리는 중' : (kind === 'artist' ? '이 무대에 컨택하기' : '컨택 요청')) + '</button></div></article>';
+  }
+  function loadPublicList(kind, root) {
+    var boxes = $$('[data-real="list"]', root || document);
+    if (!boxes.length || !SB_ON) return;
+    Promise.all([sbRpc(kind === 'artist' ? 'public_venues' : 'public_artists', {}), myContacts(kind)]).then(function (r) {
+      var m = member(kind), list = (r[0] || []).filter(function (x) { return !m || x.id !== m.id; });
+      if (!list.length) return;                                   // 아직 승인된 상대가 없으면 예시 화면 그대로
+      var sent = {}; (r[1] || []).forEach(function (c) { if (c.box === 'sent' && c.status === 'requested') sent[c.other_id] = c.id; });
+      boxes.forEach(function (box) {
+        var lim = +(box.getAttribute('data-limit') || 100);
+        box.innerHTML = list.slice(0, lim).map(function (x) { return publicCard(kind, x, sent[x.id]); }).join('') +
+          (list.length > lim ? '<a class="sub" href="' + (kind === 'artist' ? 'match.html' : 'venue-match.html') + '" style="padding:6px 0">' + list.length + (kind === 'artist' ? '곳' : '팀') + ' 모두 보기 ›</a>' : '');
+        box.hidden = false; demoOff(box, 'list');
+        $$('[data-contact-to]', box).forEach(function (b) {
+          b.addEventListener('click', function () {
+            openContact(kind, b.getAttribute('data-contact-to'), b.getAttribute('data-name'), function () {
+              b.disabled = true; b.classList.add('outline'); b.textContent = '컨택 보냄 · 답 기다리는 중';
+              loadInbox(kind, root);
+            });
+          });
+        });
+      });
+    }, function () { /* 서버 연결 불가: 예시 화면 그대로 */ });
+  }
+  function contactSheet() {
+    var bg = $('#sheet-contact'); if (bg) return bg;
+    bg = document.createElement('div'); bg.className = 'sheet-bg'; bg.id = 'sheet-contact'; bg.hidden = true;
+    bg.innerHTML = '<div class="sheet form-sheet" role="dialog" aria-modal="true" aria-labelledby="sc-t"><h2 id="sc-t">컨택 보내기</h2><p class="tiny" id="sc-sub"></p>' +
+      '<div class="grid g2" style="gap:10px"><div class="field"><label class="lbl" for="sc-date">희망 날짜</label><input class="in-text" id="sc-date" type="date"></div>' +
+      '<div class="field"><label class="lbl" for="sc-time">시간</label><select class="in-text" id="sc-time"><option value="">협의</option><option>18:00</option><option>19:00</option><option>19:30</option><option>20:00</option><option>21:00</option></select></div></div>' +
+      '<div class="field"><label class="lbl" for="sc-pay">페이 · 조건</label><input class="in-text" id="sc-pay" maxlength="60" placeholder="예: 회당 15만원 · 협의"></div>' +
+      '<div class="field"><label class="lbl" for="sc-msg">메시지</label><textarea class="in-text" id="sc-msg" maxlength="500" rows="4" style="padding:10px 14px;min-height:96px"></textarea></div>' +
+      '<p class="tiny">상대가 수락하면 서로의 연락처가 보여요.</p>' +
+      '<button type="button" class="btn block" id="sc-send">컨택 보내기</button><button type="button" class="btn ghost block" data-close>취소</button></div>';
+    document.body.appendChild(bg);
+    return bg;
+  }
+  function openContact(kind, to, name, done) {
+    var m = member(kind);
+    if (!m) { toast(kind === 'artist' ? '먼저 가수 프로필을 등록해 주세요' : '먼저 매장을 등록해 주세요'); setTimeout(function () { location.href = 'index.html?edit=' + kind; }, 1200); return; }
+    var bg = contactSheet(), btn = $('#sc-send');
+    $('#sc-t').textContent = name + '에게 컨택';
+    $('#sc-sub').textContent = kind === 'artist' ? '공연하고 싶은 날짜와 조건을 남기면 사장님이 확인하고 답해요.' : '모시고 싶은 날짜와 조건을 남기면 가수가 확인하고 답해요.';
+    $('#sc-date').min = TODAY; $('#sc-date').value = ''; $('#sc-time').value = ''; $('#sc-pay').value = '';
+    $('#sc-msg').value = kind === 'artist' ? '안녕하세요! 이 무대에서 공연하고 싶어요.' : '안녕하세요! 저희 매장 무대에 모시고 싶어요.';
+    btn.onclick = function () {
+      busy(btn, true);
+      sbRpc('send_contact', { p_from: kind, p_id: m.id, p_token: m.token, p_to: to, p_date: $('#sc-date').value || null, p_time: $('#sc-time').value || null,
+                              p_pay: val('sc-pay') || null, p_message: val('sc-msg') || null })
+        .then(function () { busy(btn, false); closeSheet(bg); toast(name + '에게 컨택을 보냈어요'); if (done) done(); },
+              function (e) { busy(btn, false); toast(errMsg(e, '보내지 못했어요. 잠시 후 다시 시도해 주세요')); });
+    };
+    openSheet('sheet-contact');
+  }
+  function replySheet() {
+    var bg = $('#sheet-reply'); if (bg) return bg;
+    bg = document.createElement('div'); bg.className = 'sheet-bg'; bg.id = 'sheet-reply'; bg.hidden = true;
+    bg.innerHTML = '<div class="sheet form-sheet" role="dialog" aria-modal="true" aria-labelledby="sr-t"><h2 id="sr-t">컨택에 답하기</h2><p class="tiny" id="sr-sub"></p>' +
+      '<div class="field"><label class="lbl" for="sr-msg">한마디 (상대에게 보여요)</label><textarea class="in-text" id="sr-msg" maxlength="300" rows="3" style="padding:10px 14px;min-height:80px"></textarea></div>' +
+      '<button type="button" class="btn block" id="sr-ok">보내기</button><button type="button" class="btn ghost block" data-close>닫기</button></div>';
+    document.body.appendChild(bg);
+    return bg;
+  }
+  function contactItem(c) {
+    var stt = CSTATUS[c.status] || [c.status, 'done'], recv = c.box === 'received', ph = c.status === 'accepted' ? telOf(c.other_phone) : '', link = linkOf(c.other_link);
+    var label = recv && c.status === 'requested' ? ['새 요청', 'yes'] : stt;
+    return '<article class="mcard" data-cid="' + esc(c.id) + '">' +
+      '<div class="between" style="align-items:flex-start;gap:10px"><div class="stack" style="gap:2px;min-width:0"><span class="tiny">' + (recv ? '받은 컨택' : '보낸 컨택') + ' · ' + esc(dayLabel(String(c.created_at).slice(0, 10))) + '</span>' +
+      '<b style="font-size:15px">' + esc(c.other_name || '') + '</b>' + (c.other_info ? '<span class="tiny">' + esc(c.other_info) + '</span>' : '') + '</div><span class="pill ' + label[1] + '">' + esc(label[0]) + '</span></div>' +
+      '<span class="tiny" style="color:var(--fg-2)">희망 · ' + esc(wishText(c)) + '</span>' +
+      (c.message ? '<p class="why">' + esc(c.message) + '</p>' : '') +
+      (c.reply ? '<p class="note"><b>' + (recv ? '내 답장' : '답장') + '</b> ' + esc(c.reply) + '</p>' : '') +
+      (link ? '<a class="sub" href="' + esc(link) + '" target="_blank" rel="noopener">공연 영상 · 음원 보기 ›</a>' : '') +
+      (ph ? '<div class="row" style="gap:8px;align-items:center"><a class="btn sm" href="tel:' + esc(ph) + '">전화</a><a class="btn ghost sm" href="sms:' + esc(ph) + '">문자</a><span class="tiny">' + esc(c.other_phone) + '</span></div>' : '') +
+      (recv && c.status === 'requested' ? '<div class="grid g2" style="gap:8px"><button type="button" class="btn ghost sm" data-act="declined">거절</button><button type="button" class="btn sm" data-act="accepted">수락</button></div>' : '') +
+      (!recv && c.status === 'requested' ? '<button type="button" class="btn ghost sm" data-act="cancel" style="align-self:flex-start">컨택 취소</button>' : '') +
+      '</article>';
+  }
+  function loadInbox(kind, root) {
+    var boxes = $$('[data-real="inbox"]', root || document);
+    if (!boxes.length || !member(kind) || !SB_ON) return;
+    myContacts(kind).then(function (list) {
+      boxes.forEach(function (box) {
+        var lim = +(box.getAttribute('data-limit') || 100);
+        box.hidden = false; demoOff(box, 'inbox');
+        box.innerHTML = !list.length ? '<p class="empty">' + (kind === 'venue' ? '아직 받은 컨택 요청이 없어요. 매장이 승인되면 가수들이 컨택할 수 있고, 가수 섭외에서 먼저 컨택할 수도 있어요.' : '아직 주고받은 컨택이 없어요. 마음에 드는 무대에 먼저 컨택해 보세요.') + '</p>'
+          : list.slice(0, lim).map(contactItem).join('') + (list.length > lim ? '<a class="sub" href="' + (kind === 'venue' ? 'partner.html' : 'match.html') + '" style="padding:6px 0">' + list.length + '건 모두 보기 ›</a>' : '');
+        if (box.getAttribute('data-bound')) return;
+        box.setAttribute('data-bound', '1');
+        box.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-act]'); if (!b) return;
+          var card = b.closest('[data-cid]'), cid = card.getAttribute('data-cid'), act = b.getAttribute('data-act'), m = member(kind);
+          if (!m) return;
+          if (act === 'cancel') {
+            busy(b, true);
+            sbRpc('cancel_contact', { p_from: kind, p_id: m.id, p_token: m.token, p_contact: cid }).then(function (ok) { toast(ok ? '컨택을 취소했어요' : '이미 답을 받은 컨택이에요'); loadInbox(kind, root); loadPublicList(kind, root); },
+              function () { busy(b, false); toast('취소하지 못했어요. 잠시 후 다시 시도해 주세요'); });
+            return;
+          }
+          var bg = replySheet(), ok = $('#sr-ok'), name = $('b', card).textContent;
+          $('#sr-t').textContent = act === 'accepted' ? name + '의 컨택을 수락할까요?' : name + '의 컨택을 거절할까요?';
+          $('#sr-sub').textContent = act === 'accepted' ? '수락하면 서로의 연락처가 보여요. 일정은 전화나 문자로 맞춰 주세요.' : '정중한 한마디를 남기면 다음 컨택으로 이어지기 쉬워요.';
+          $('#sr-msg').value = act === 'accepted' ? '좋아요! 연락드릴게요.' : '이번에는 일정이 맞지 않아요. 다음에 꼭 함께해요.';
+          ok.textContent = act === 'accepted' ? '수락하기' : '거절하기';
+          ok.onclick = function () {
+            busy(ok, true);
+            sbRpc('respond_contact', { p_kind: kind, p_id: m.id, p_token: m.token, p_contact: cid, p_status: act, p_reply: val('sr-msg') || null }).then(function (done) {
+              busy(ok, false); ok.textContent = act === 'accepted' ? '수락하기' : '거절하기'; closeSheet(bg);
+              toast(done ? (act === 'accepted' ? '수락했어요 · 이제 서로 연락할 수 있어요' : '거절했어요') : '이미 처리된 컨택이에요');
+              loadInbox(kind, root);
+            }, function () { busy(ok, false); toast('보내지 못했어요. 잠시 후 다시 시도해 주세요'); });
+          };
+          openSheet('sheet-reply');
+        });
+      });
+    });
+  }
 
   PAGES.clip = function () {
     var v = $('#clip-video'), sb = $('#sound'), CL = D.clips || [];
@@ -496,27 +832,59 @@
       var total = won(ppl * 10000) + '원';
       var s = l[si];
       $('#b-picked').textContent = s ? dayLabel(day) + ' ' + s.t + ' ' + who(s) : '공연을 골라 주세요';
-      $('#b-total').textContent = total; $('#b-ppl2').textContent = ppl + '명';
       $('#b-visit').textContent = '방문하면 직관 등급이 자동으로 올라가요 · 지금 ' + vg.name + ' ' + f.visits + '회 → ' + (f.visits + 1) + '회';
       var front = $('#b-front'); if (front) { var ok = f.visits >= 30; front.disabled = !ok; front.setAttribute('aria-disabled', ok ? 'false' : 'true'); }
-      if (mode === 'watch') { cta.textContent = s ? '예약금 ' + total + ' 결제하기' : '예약할 공연이 없어요'; cta.disabled = !s; }
+      if (mode === 'watch') { cta.textContent = s ? '예약 신청하기 · ' + ppl + '명' : '예약할 공연이 없어요'; cta.disabled = !s; }
       else { cta.textContent = '대관 견적 요청하기'; cta.disabled = false; }
     }
     single($('#b-seat'));
+    var pf = profileOf('fan') || {}, kp = st('kakao', null) || {};
+    if ((pf.name || kp.name || kp.nickname) && !val('b-name')) $('#b-name').value = pf.name || kp.name || kp.nickname;
+    if ((pf.phone || kp.phone) && !val('b-phone')) $('#b-phone').value = pf.phone || kp.phone;
+    if (session()) $$('#b-guest [data-kakao-out]').forEach(function (el) { el.remove(); });
+    $('#b-agree').addEventListener('change', function () { $('#b-agree-err').hidden = true; });
     cta.addEventListener('click', function () {
-      if (mode === 'rent') { $('#rent-text').textContent = (day ? dayLabel(day) + ' · ' : '') + ppl + '명 대관 견적을 요청했어요. 매장 확인 후 견적이 도착해요.'; openSheet('sheet-rent'); return; }
-      var s = list()[si]; if (!s) return;
-      var bk = store.get(BOOK_KEY, []) || []; bk.push({ d: s.d, t: s.t, a: who(s), ppl: ppl, at: TODAY }); store.set(BOOK_KEY, bk);
-      $('#book-text').textContent = dayLabel(s.d) + ' ' + s.t + ' ' + who(s) + ' · ' + ppl + '명 예약됐어요. 방문하면 직관 ' + (f.visits + 1) + '회째로 기록돼요.';
-      openSheet('sheet-book');
+      var s = mode === 'watch' ? list()[si] : null;
+      if (mode === 'watch' && !s) return;
+      if (!requireFields($('#b-guest'), ['b-name', 'b-phone'])) return;
+      if (!agreeOk('b-agree')) return;
+      var ref = uid(), fm = member('fan');
+      var args = { p_ref: ref, p_kind: mode, p_date: s ? s.d : (day || null), p_time: s ? s.t : null, p_artist: s ? who(s) : null, p_people: ppl,
+                   p_name: val('b-name'), p_phone: val('b-phone'), p_request: val('b-req') || null, p_fan_id: fm ? fm.id : null, p_fan_token: fm ? fm.token : null };
+      var item = { ref: ref, kind: mode, d: args.p_date, t: args.p_time || '', a: args.p_artist || '대관 견적', ppl: ppl, at: TODAY, status: 'requested' };
+      function done(where) {
+        if (where === 'local') { item.status = 'local'; toast('서버에 연결하지 못해 이 기기에만 저장했어요'); }
+        var bk = store.get(BOOK_KEY, []) || []; bk.push(item); store.set(BOOK_KEY, bk);
+        if (!pf.name) put('profile-fan', { name: args.p_name, phone: args.p_phone, genres: [], area: '', at: TODAY });
+        if (mode === 'rent') { $('#rent-text').textContent = (day ? dayLabel(day) + ' · ' : '') + ppl + '명 대관 견적을 요청했어요.'; openSheet('sheet-rent'); }
+        else { $('#book-text').textContent = dayLabel(s.d) + ' ' + s.t + ' ' + who(s) + ' · ' + ppl + '명 예약을 신청했어요.'; openSheet('sheet-book'); }
+      }
+      busy(cta, true);
+      sbRpc('create_booking', args).then(function () { busy(cta, false); done('server'); }, function (e) {
+        busy(cta, false);
+        if (e && e.network) { done('local'); return; }
+        toast(errMsg(e, '신청하지 못했어요. 잠시 후 다시 시도해 주세요'));
+      });
     });
     draw();
   };
 
   PAGES.tip = function () {
-    var amts = [3000, 5000, 10000, 50000], ai = 2, pi = 0, pays = ['카드', '계좌이체', '카카오페이', '토스페이'];
+    var amts = [3000, 5000, 10000, 50000], ai = 2;
+    var box = $('#t-artists'), inp = $('#t-artist'), foot = $('.foot[data-sms]'), smsNo = foot ? foot.getAttribute('data-sms') : '';
+    // 오늘 공연하는 뮤지션 (공연 일정에서)
+    var seen = {}, today = showsOn(TODAY).filter(function (x) { return x.type !== 'rental' && x.a && !seen[x.a] && (seen[x.a] = 1); });
+    var q = new URLSearchParams(location.search).get('to');
+    $('#t-stage').textContent = today.length ? '오늘 행2PM8PM 무대 · ' + today.map(function (x) { return x.t; }).join(', ') : '행2PM8PM 무대';
+    box.innerHTML = today.map(function (x) { return '<button type="button" class="chip" data-a="' + esc(x.a) + '" aria-pressed="false">' + esc(x.a) + '</button>'; }).join('');
+    box.hidden = !today.length;
+    function drawChips() { $$('[data-a]', box).forEach(function (c) { c.setAttribute('aria-pressed', c.getAttribute('data-a') === inp.value.trim() ? 'true' : 'false'); }); }
+    if (!inp.value) inp.value = (q && q.slice(0, 40)) || (today[0] ? today[0].a : '');
+    box.addEventListener('click', function (e) { var c = e.target.closest('[data-a]'); if (!c) return; inp.value = c.getAttribute('data-a'); drawChips(); });
+    inp.addEventListener('input', drawChips); drawChips();
+    var pf = profileOf('fan') || {}, kp = st('kakao', null) || {};
+    if (!val('t-payer')) $('#t-payer').value = kp.name || pf.name || '';
     single($('#t-amt'), function (b) { ai = +b.getAttribute('data-i'); draw(); });
-    single($('#t-pay'), function (b) { pi = +b.getAttribute('data-i'); draw(); });
     function draw() {
       var f = fan(), base = f.tip, amt = amts[ai], after = base + amt, tg = grade(TIPG, base), ag = grade(TIPG, after);
       var goal = tg.next ? tg.next[0] : after, reach = tg.next && after >= goal;
@@ -529,20 +897,31 @@
       gt.style.color = reach ? 'var(--accent)' : 'var(--muted)';
       var songOpen = after >= 100000 || f.visits >= 15;
       $('#t-song').hidden = !songOpen; $('#t-song-lock').hidden = songOpen;
-      $('#t-send').textContent = '새벽오렌지에게 ' + won(amt) + '원 보내기 · ' + pays[pi];
+      $('#t-amt-text').textContent = won(amt) + '원';
       bindFan();
     }
+    $('#t-copy').addEventListener('click', function () {
+      var no = this.getAttribute('data-copy-text');
+      (navigator.clipboard ? navigator.clipboard.writeText(no) : Promise.reject()).then(function () { toast('계좌번호를 복사했어요 · ' + no); }, function () { toast('계좌번호: ' + no); });
+    });
+    var lastLink = '';
+    function smsLink() {
+      var song = $('#t-song').hidden ? '' : val('t-song-in'), ns = showsOn(TODAY).filter(function (x) { return x.a === val('t-artist'); })[0];
+      var body = ['[컨택싱어 현장 팁]', '입금자명: ' + val('t-payer'), '금액: ' + won(amts[ai]) + '원', '받을 뮤지션: ' + val('t-artist'),
+                  '공연: 행2PM8PM ' + dayLabel(TODAY) + (ns ? ' ' + ns.t : '')].concat(val('t-msg') ? ['한마디: ' + val('t-msg')] : [], song ? ['신청곡: ' + song] : []).join('\n');
+      return 'sms:' + smsNo.replace(/[^0-9]/g, '') + '?&body=' + encodeURIComponent(body);
+    }
     $('#t-send').addEventListener('click', function () {
-      var f = fan(), amt = amts[ai], before = grade(TIPG, f.tip), after = f.tip + amt, ag = grade(TIPG, after);
-      put('tip', after);
-      inboxAdd('tips', { date: TODAY, fan: '웹 방문자', artist: '새벽오렌지', amount: amt, method: pays[pi], paid: false });
-      var up = ag.name !== before.name;
-      $('#sheet-tip-t').textContent = up ? ag.name + ' 등급 달성!' : '팁을 보냈어요';
-      $('#tip-text').textContent = up
-        ? '새벽오렌지 피드 댓글에 ' + ag.name + ' 뱃지가 붙고 상위에 노출돼요.' + (ag.name === '큰손' ? ' 다음 공연부터 신청곡 우선권과 사인을 받을 수 있어요.' : '')
-        : won(amt) + '원이 새벽오렌지에게 전달됐어요.' + (ag.next ? ' ' + ag.next[1] + '까지 ' + won(ag.next[0] - after) + '원 남았어요.' : '');
-      $('#t-msg').value = ''; var song = $('#t-song input'); if (song) song.value = '';
-      openSheet('sheet-tip'); draw();
+      if (!requireFields($('main'), ['t-artist', 't-payer'])) return;
+      lastLink = smsLink();
+      var list = store.get('csm-tips', []) || [];
+      list.push({ at: TODAY, artist: val('t-artist'), amount: amts[ai], payer: val('t-payer'), status: 'sms' });
+      store.set('csm-tips', list.slice(-30));
+      $('#tip-text').textContent = '문자를 보내면 입금을 확인한 뒤 ' + val('t-artist') + '님께 ' + won(amts[ai]) + '원을 100% 그대로 전달해요.';
+      $('#tip-sms-fallback').textContent = '문자 앱이 열리지 않으면 ' + smsNo + '로 입금자명 · 금액 · 받을 뮤지션을 직접 보내 주세요.';
+      $('#tip-sms-again').setAttribute('href', lastLink);
+      openSheet('sheet-tip');
+      location.href = lastLink;
     });
     draw();
   };
@@ -620,7 +999,7 @@
       draw();
     });
   }
-  PAGES.match = function () { bindReq(document); };
+  PAGES.match = function () { bindReq(document); memberStatus('artist'); loadPublicList('artist'); loadInbox('artist'); };
 
   PAGES['venue-match'] = function () {
     var asked = st('venueAsked', {});
@@ -633,10 +1012,11 @@
     $$('[data-ask]').forEach(function (b) {
       var id = b.getAttribute('data-ask');
       function draw() { var on = !!asked[id]; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.textContent = on ? '컨택 보냄' : '컨택 요청'; b.className = on ? 'btn outline sm' : 'btn sm'; }
-      b.addEventListener('click', function () { asked[id] = !asked[id]; put('venueAsked', asked); draw(); toast(asked[id] ? '싱어에게 컨택 요청을 보냈어요' : '컨택을 취소했어요'); });
+      b.addEventListener('click', function () { asked[id] = !asked[id]; put('venueAsked', asked); draw(); toast(asked[id] ? '싱어에게 컨택 요청을 보냈어요 (예시)' : '컨택을 취소했어요'); });
       draw();
     });
     count();
+    memberStatus('venue'); loadPublicList('venue');
   };
 
   // 다가오는 무대: 실제 공연 일정에서 오늘부터 7일 (파트너 센터 · 홈의 사장님 화면)
@@ -657,6 +1037,7 @@
   }
 
   PAGES.partner = function () {
+    memberStatus('venue'); loadInbox('venue');
     var req = st('partnerReq', {});
     $$('[data-request]').forEach(function (card) {
       var id = card.getAttribute('data-request');
@@ -756,7 +1137,7 @@
                    audio_file: au ? au.name : null, video_file: vf ? vf.name : null }
       };
       var btn = $('#ar-submit'); busy(btn, true);
-      saveMember('artists', row, [{ folder: 'artist-photo', files: [photo], set: function (r, ps) { r.photo_path = ps[0]; } }]).then(function (where) {
+      saveMember('artist', row, [{ folder: 'artist-photo', files: [photo], set: function (r, ps) { r.photo_path = ps[0]; } }]).then(function (where) {
         busy(btn, false); savedWhere(where);
         put('role', 'artist'); put('profile-artist', { name: row.name, phone: row.phone, lineup: row.lineup || '', genres: row.genres, link: row.link || '', at: TODAY });
         openSheet('sheet-done');
@@ -801,7 +1182,7 @@
                    pay: picked($('#vr-pay'))[0] || null, mood: val('vr-mood') || null, equipment: picked($('#vr-gear')) }
       };
       var btn = $('#vr-submit'); busy(btn, true);
-      saveMember('venues', row, [
+      saveMember('venue', row, [
         { folder: 'venue-cert', files: [cert], set: function (r, ps) { r.cert_path = ps[0]; } },
         { folder: 'venue-photo', files: photos, set: function (r, ps) { r.photo_paths = ps; } }
       ]).then(function (where) {
@@ -827,8 +1208,14 @@
     $('h2', d).textContent = title; $('p', d).textContent = msg;
     document.body.appendChild(d);
   }
+  document.addEventListener('click', function (e) {
+    var k = e.target.closest('[data-kakao-start]'); if (k) { e.preventDefault(); kakaoStart(k.getAttribute('data-kakao-start'), k.getAttribute('data-back')); return; }
+    var o = e.target.closest('[data-kakao-logout]'); if (o) { e.preventDefault(); kakaoLogout(); }
+  });
   function applySettings(rows) {
     var s = {}; (rows || []).forEach(function (r) { s[r.key] = r.value || {}; });
+    AUTH = s.auth || {};
+    if (AUTH.kakao) $$('[data-kakao]').forEach(function (el) { if (session() && (el.classList.contains('kakao-box') || el.hasAttribute('data-kakao-out'))) return; el.hidden = false; });
     var m = s.maintenance || {};
     if (m.on) { IS_MAINT = true; blockScreen('잠시 점검 중이에요', m.message || '곧 다시 만나요!', false); return; }
     FEAT = s.features || {};
@@ -901,6 +1288,15 @@
   // 첫 화면: 연락 · 접촉 · 교제를 고르면 연결 그림과 설명 카드가 함께 바뀐다
   /* ---------- 실행 ---------- */
   var page = document.body.getAttribute('data-page');
+  // 관리자가 보낸 '앱 연결 링크'로 다른 기기에서도 내 매장 · 프로필을 이어서 쓴다
+  (function linkDevice() {
+    var q = new URLSearchParams(location.search), m = q.get('member'), re = /^[0-9a-f-]{36}$/i;
+    if (!m) return;
+    var p = m.split('.');
+    if (p.length === 3 && TABLE_OF[p[0]] && re.test(p[1]) && re.test(p[2])) { put('member-' + p[0], { id: p[1], token: p[2] }); put('role', p[0]); setTimeout(function () { toast('이 기기를 연결했어요'); }, 400); }
+    q.delete('member');
+    try { history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : '') + location.hash); } catch (e) { /* 주소 변경 불가 */ }
+  })();
   if (PAGES[page]) PAGES[page]();
   autoVideos();
   loadRemote();

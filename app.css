@@ -553,3 +553,39 @@ tbody tr:last-child > *{border-bottom:0}
 .cs-block p{max-width:300px;font-size:14px;line-height:1.6;color:var(--fg-2);white-space:pre-line}
 .cs-block .btn{margin-top:8px}
 .pop-foot button:focus-visible{outline-offset:-3px}
+
+/* 카카오 로그인 (카카오 디자인 가이드: #FEE500 배경 · 검은 심볼) */
+.btn.kakao{background:#FEE500;color:rgba(0,0,0,.85);gap:8px;font-weight:700}
+.btn.kakao:hover{filter:brightness(.97)}
+.kakao-box{display:flex;flex-direction:column;gap:8px}
+.kakao-box .btn.kakao{min-height:52px;font-size:15px}
+.kakao-box a{color:inherit}
+.or{display:flex;align-items:center;gap:10px;margin:6px 0 2px;font-size:12px;color:var(--muted)}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line-2)}
+.pf-login{display:flex;justify-content:center}
+.pf-kakao{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 16px;border:0;border-radius:20px;background:#FEE500;color:rgba(0,0,0,.85);font-size:13.5px;font-weight:700;cursor:pointer}
+.pf-who{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:#C9C9D1}
+.pf-who button{border:0;background:transparent;color:#fff;text-decoration:underline;font-size:13px;cursor:pointer;padding:6px 2px}
+.privacy h2{font-size:16px;font-weight:700;margin-top:10px}
+.privacy p,.privacy li{font-size:14px;line-height:1.7;color:var(--fg-2)}
+.privacy ul{margin:0;padding-left:18px}
+.tbl-plain{width:100%;border-collapse:collapse;font-size:13.5px}
+.tbl-plain th,.tbl-plain td{padding:9px 10px;border:1px solid var(--line-2);text-align:left;vertical-align:top;line-height:1.55}
+.tbl-plain th{background:var(--surface);font-weight:600}
+.tbl-plain td:first-child{white-space:nowrap;font-weight:600;color:var(--fg)}
+
+/* 현장 팁: 계좌이체 안내 */
+.opt.soon{opacity:.55;cursor:not-allowed}
+.soon-tag{margin-left:auto;padding:1px 7px;border-radius:6px;background:var(--surface);color:var(--muted);font-size:11px;font-weight:600}
+.bank{display:flex;flex-direction:column;gap:12px;padding:16px;border-radius:14px;border:1.5px solid var(--accent);background:var(--accent-soft)}
+.bank h2{font-size:15px;font-weight:700;color:var(--accent-text)}
+.bank-acc{display:grid;grid-template-columns:1fr auto;grid-template-areas:"name btn" "no btn" "holder btn";align-items:center;gap:2px 12px;padding:14px;border-radius:12px;background:var(--bg)}
+.bank-acc .bank-name{grid-area:name;font-size:12.5px;font-weight:600;color:var(--fg-2)}
+.bank-acc b{grid-area:no;font-size:18px;font-weight:800;color:var(--fg);white-space:nowrap}
+.bank-acc .tiny{grid-area:holder}
+.bank-acc .btn{grid-area:btn}
+.bank-steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;line-height:1.6;color:var(--fg-2)}
+.bank-steps b{color:var(--fg)}
+.bank-promise{display:flex;align-items:flex-start;gap:6px;font-size:13.5px;line-height:1.5;font-weight:600;color:var(--accent-text)}
+.bank-promise svg{flex:none;margin-top:2px}
+.bank-promise b{color:var(--accent-text)}
