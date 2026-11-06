@@ -3,11 +3,18 @@
   "short_name": "컨택싱어",
   "lang": "ko",
   "description": "싱어 · 공연장 · 관객이 서로 컨택하는 라이브 공연 플랫폼",
-  "start_url": "./home.html",
+  "id": "./",
+  "start_url": "./index.html?source=app",
   "scope": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#FFFFFF",
   "theme_color": "#FFFFFF",
+  "categories": [
+    "music",
+    "entertainment",
+    "lifestyle"
+  ],
   "icons": [
     {
       "src": "icon-192.png",

@@ -1,6 +1,6 @@
 /* 컨택싱어 웹앱 — 공통 스크립트
    각 화면은 <body data-page="..."> 값으로 아래 PAGES 중 하나가 실행된다.
-   시안이라 서버가 없다: 화면 상태와 등록 내용은 이 브라우저(localStorage)에만 저장된다. */
+   화면 상태는 이 브라우저(localStorage)에, 등록 · 컨택 · 예약은 Supabase에 저장된다. */
 (function () {
   'use strict';
   var D = window.CSM || { shows: [] };
@@ -152,6 +152,21 @@
     return sbReq('/storage/v1/object/uploads/' + path, { method: 'POST', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' } })
       .then(function () { return path; });
   }
+  // 큰 파일(영상) 올리기: 진행률을 보여 주려고 XMLHttpRequest 사용
+  function sbPut(bucket, path, blob, type, onProg) {
+    return new Promise(function (res, rej) {
+      if (!SB_ON) { rej(netErr('설정 없음')); return; }
+      var x = new XMLHttpRequest();
+      x.open('POST', CFG.url + '/storage/v1/object/' + bucket + '/' + path);
+      x.setRequestHeader('apikey', CFG.key); x.setRequestHeader('Content-Type', type || 'application/octet-stream'); x.setRequestHeader('x-upsert', 'false');
+      if (onProg && x.upload) x.upload.onprogress = function (e) { if (e.lengthComputable) onProg(e.loaded / e.total); };
+      x.onload = function () { if (x.status >= 200 && x.status < 300) res(path); else { var e = new Error(x.responseText || ('HTTP ' + x.status)); e.status = x.status; rej(e); } };
+      x.onerror = function () { rej(netErr('upload')); };
+      x.ontimeout = function () { rej(netErr('timeout')); };
+      x.timeout = 300000;
+      x.send(blob);
+    });
+  }
   // 등록 정보 저장: 파일을 먼저 올리고 표에 한 줄 추가. 서버에 닿지 못하면(오프라인 · 미리보기) 이 기기에만 남긴다.
   function saveMember(kind, row, uploads) {
     var table = TABLE_OF[kind], mem = member(kind);
@@ -254,7 +269,11 @@
   var ICON = {
     check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
-    chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
+    chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg>',
+    mute: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg>',
+    sound: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+    share: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M5 13v6h14v-6"/></svg>',
+    gift: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8S10.5 3.5 8 4.2 8.5 8 12 8Zm0 0s1.5-4.5 4-3.8S15.5 8 12 8Z"/></svg>'
   };
   var toastTimer;
   function toast(msg) {
@@ -386,15 +405,17 @@
   // 시작 화면: 넷플릭스처럼 프로필 고르기 → (처음이면) 정보 입력 → 정보 받는 중 1~100% → 홈
   /* ---------- 무대 영상: 화면에 보이는 영상만 소리 없이 반복 재생 ---------- */
   var REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  function autoVideos() {
-    var vids = $$('video[data-auto]');
+  var VIO = null;
+  function autoVideos(root) {
+    var vids = $$('video[data-auto]', root || document).filter(function (v) { return !v.hasAttribute('data-io'); });
     if (!vids.length || REDUCED) return;
-    function play(v) { v.muted = true; if (v.preload !== 'auto') v.preload = 'auto'; var p = v.play(); if (p && p.catch) p.catch(function () { /* 자동재생 제한: 포스터만 보임 */ }); }
+    vids.forEach(function (v) { v.setAttribute('data-io', ''); });
+    function play(v) { if (!v.hasAttribute('data-sound')) v.muted = true; if (v.preload !== 'auto') v.preload = 'auto'; var p = v.play(); if (p && p.catch) p.catch(function () { /* 자동재생 제한: 포스터만 보임 */ }); }
     if (!('IntersectionObserver' in window)) { vids.forEach(function (v) { if (v.offsetParent) play(v); }); return; }
-    var io = new IntersectionObserver(function (es) {
+    if (!VIO) VIO = new IntersectionObserver(function (es) {
       es.forEach(function (e) { if (e.isIntersecting && e.target.offsetParent) play(e.target); else e.target.pause(); });
     }, { threshold: 0.35 });
-    vids.forEach(function (v) { io.observe(v); });
+    vids.forEach(function (v) { VIO.observe(v); });
   }
 
   PAGES.intro = function () {
@@ -933,17 +954,20 @@
     var more = $('#more-comments');
     if (more) more.addEventListener('click', function () { $$('.comment[hidden]').forEach(function (c) { c.hidden = false; }); more.hidden = true; });
     // 피드 종류
+    var curKind = 'rec';
     function filter(kind) {
-      var following = !!st('following', false), n = 0;
+      var following = !!st('following', false), n = 0; curKind = kind;
       $$('.post').forEach(function (p) {
         var tags = (p.getAttribute('data-tags') || '').split(' ');
         var show = kind === 'rec' ? tags.indexOf('rec') >= 0 : kind === 'near' ? tags.indexOf('near') >= 0 : (following && tags.indexOf('dawn') >= 0);
+        if (p.hasAttribute('data-off')) show = false;
         p.hidden = !show; if (show) n++;
       });
       $('#feed-empty').hidden = n > 0;
     }
     single($('#feed-tabs'), function (b) { filter(b.getAttribute('data-v')); });
     filter('rec');
+    feedClips(function () { filter(curKind); });
     // 오늘 라인업 (공연장 소식)
     var lu = $('#lineup');
     if (lu) {
@@ -963,6 +987,195 @@
       clearInterval(timer); if (on) timer = setInterval(tick, 1000);
     });
   };
+
+  /* ---------- 피드 영상: 가수가 올린 15초 이내 클립 (누구나 보기 · 승인된 가수만 올리기) ---------- */
+  var CLIP_MAX = 15.5, CLIP_MB = 30;
+  function ago(iso) {
+    var t = Date.parse(iso); if (isNaN(t)) return '';
+    var m = Math.floor((Date.now() - t) / 60000);
+    if (m < 1) return '방금'; if (m < 60) return m + '분 전'; if (m < 1440) return Math.floor(m / 60) + '시간 전'; if (m < 10080) return Math.floor(m / 1440) + '일 전';
+    var d = new Date(t); return (d.getMonth() + 1) + '.' + d.getDate();
+  }
+  function secLabel(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
+  function clipExt(f) {
+    var n = (f.name || '').toLowerCase().match(/\.([a-z0-9]{2,5})$/), e = n ? n[1] : '', t = (f.type || '').toLowerCase();
+    if (e === 'mp4' || e === 'm4v' || t === 'video/mp4') return 'mp4';
+    if (e === 'mov' || e === 'qt' || t === 'video/quicktime') return 'mov';
+    if (e === 'webm' || t === 'video/webm') return 'webm';
+    return '';
+  }
+  var CLIP_TYPE = { mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
+  function clipErr(e) {
+    var m = String((e && e.message) || '');
+    if (/not_approved/.test(m)) return '프로필이 승인되면 영상을 올릴 수 있어요';
+    if (/too_long/.test(m)) return '15초 이내 영상만 올릴 수 있어요';
+    if (/too_many/.test(m)) return '하루에 10개까지 올릴 수 있어요. 내일 다시 올려 주세요';
+    if (/not_member/.test(m)) return '가수 프로필을 확인하지 못했어요. 홈의 정보 수정에서 다시 등록해 주세요';
+    if (e && (e.status === 413 || /too large|maximum allowed size|Payload/i.test(m))) return '영상이 너무 커요. 30MB 이하로 올려 주세요';
+    if (e && (e.status === 415 || /mime/i.test(m))) return 'mp4 · mov · webm 영상만 올릴 수 있어요';
+    if (e && e.network) return '인터넷 연결이 불안정해요. 와이파이에서 다시 시도해 주세요';
+    return '올리지 못했어요. 잠시 후 다시 시도해 주세요';
+  }
+  function readDuration(v, url) {
+    return new Promise(function (res, rej) {
+      var done = false, t = setTimeout(function () { end(null, new Error('timeout')); }, 15000);
+      function end(d, err) { if (done) return; done = true; clearTimeout(t); v.onloadedmetadata = v.ondurationchange = v.onerror = null; if (err) rej(err); else res(d); }
+      v.onloadedmetadata = function () {
+        if (isFinite(v.duration) && v.duration > 0) { end(v.duration); return; }
+        // 길이 정보가 없는 영상(일부 webm): 끝으로 옮겨서 길이를 알아낸다
+        v.ondurationchange = function () { if (isFinite(v.duration) && v.duration > 0) { var d = v.duration; try { v.currentTime = 0; } catch (x) { /* 무시 */ } end(d); } };
+        try { v.currentTime = 1e7; } catch (x) { end(null, x); }
+      };
+      v.onerror = function () { end(null, new Error('decode')); };
+      v.src = url; v.load();
+    });
+  }
+  function grabPoster(v, d) {
+    return new Promise(function (res) {
+      var t = setTimeout(function () { v.onseeked = null; res(null); }, 6000);
+      function draw() {
+        try {
+          var w = v.videoWidth, h = v.videoHeight; if (!w || !h) { clearTimeout(t); res(null); return; }
+          var k = Math.min(1, 720 / Math.max(w, h)), c = document.createElement('canvas');
+          c.width = Math.round(w * k); c.height = Math.round(h * k);
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          c.toBlob(function (b) { clearTimeout(t); res(b && b.size > 1500 ? b : null); }, 'image/jpeg', 0.8);
+        } catch (x) { clearTimeout(t); res(null); }
+      }
+      v.onseeked = function () { v.onseeked = null; draw(); };
+      try { v.currentTime = Math.min(0.5, d / 2); } catch (x) { clearTimeout(t); res(null); }
+    });
+  }
+  function clipPost(r, url, mine) {
+    var sub = [r.lineup, (r.genres || []).slice(0, 2).join(' · '), ago(r.created_at)].filter(Boolean).join(' · ');
+    var poster = r.poster_path && url[r.poster_path] ? ' poster="' + esc(url[r.poster_path]) + '"' : '';
+    return '<article class="post" data-tags="rec" data-clip="' + esc(r.id) + '">' +
+      '<div class="row pad" style="padding-right:12px"><span class="row" style="flex:1;min-width:0;gap:10px"><span class="avatar plain ini" aria-hidden="true">' + esc(String(r.artist_name || '?').slice(0, 1)) + '</span>' +
+      '<span class="stack" style="gap:1px;min-width:0"><b style="font-size:15px">' + esc(r.artist_name) + '</b><span class="tiny">' + esc(sub) + '</span></span></span>' +
+      (mine ? '<button type="button" class="btn sm ghost" data-del-clip>내리기</button>' : '') + '</div>' +
+      '<div class="post-media tall"><video data-auto src="' + esc(url[r.video_path]) + '"' + poster + ' muted loop playsinline preload="none" aria-label="' + esc(r.artist_name) + ' 공연 클립"></video>' +
+      '<button type="button" class="snd" aria-pressed="false" aria-label="소리 켜기">' + ICON.mute + '</button>' +
+      '<span class="dur chip-glass mono" style="position:absolute;right:12px;bottom:12px">' + secLabel(r.duration) + '</span></div>' +
+      '<div class="post-actions"><button type="button" class="act" data-share aria-label="공유">' + ICON.share + '</button><span style="flex:1"></span>' +
+      '<a class="btn sm" href="tip.html?to=' + encodeURIComponent(r.artist_name || '') + '" style="background:var(--accent-soft);color:var(--accent)">' + ICON.gift + '팁</a></div>' +
+      (r.caption ? '<p class="pad" style="font-size:14px;line-height:1.55;white-space:pre-line">' + esc(r.caption) + '</p>' : '') + '</article>';
+  }
+  function feedClips(after) {
+    var box = $('#feed-real'); if (!box) return;
+    function demo(on) { $$('[data-demo-post]').forEach(function (p) { if (on) p.removeAttribute('data-off'); else p.setAttribute('data-off', ''); }); }
+    function soundBtn(b, on) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.setAttribute('aria-label', on ? '소리 끄기' : '소리 켜기'); b.innerHTML = on ? ICON.sound : ICON.mute; }
+    function bind() {
+      $$('.post-media', box).forEach(function (m) {
+        var v = $('video', m), b = $('.snd', m);
+        function flip() {
+          var on = v.muted;
+          $$('video', box).forEach(function (o) { if (o !== v) { o.muted = true; o.removeAttribute('data-sound'); } });
+          v.muted = !on;
+          if (on) { v.setAttribute('data-sound', ''); var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.removeAttribute('data-sound');
+          $$('.post-media', box).forEach(function (o) { var ob = $('.snd', o), ov = $('video', o); if (ob && ov) soundBtn(ob, !ov.muted); });
+        }
+        v.addEventListener('volumechange', function () { soundBtn(b, !v.muted); });
+        b.addEventListener('click', function (e) { e.stopPropagation(); flip(); });
+        v.addEventListener('click', flip);
+      });
+      $$('[data-share]', box).forEach(function (b) { b.addEventListener('click', function () { share('컨택싱어 피드'); }); });
+      $$('[data-del-clip]', box).forEach(function (b) {
+        b.addEventListener('click', function () {
+          if (!b.hasAttribute('data-sure')) {
+            b.setAttribute('data-sure', ''); b.textContent = '한 번 더 누르면 내려가요';
+            setTimeout(function () { if (b.isConnected && !b.disabled) { b.removeAttribute('data-sure'); b.textContent = '내리기'; } }, 3000);
+            return;
+          }
+          var m = member('artist'), id = b.closest('[data-clip]').getAttribute('data-clip');
+          if (!m) return;
+          b.disabled = true; b.textContent = '내리는 중…';
+          sbRpc('delete_my_clip', { p_id: m.id, p_token: m.token, p_clip: id }).then(function (ok) {
+            if (!ok) throw new Error('no');
+            toast('영상을 내렸어요'); load();
+          }).catch(function () { b.disabled = false; b.removeAttribute('data-sure'); b.textContent = '내리기'; toast('내리지 못했어요. 잠시 후 다시 시도해 주세요'); });
+        });
+      });
+    }
+    function load() {
+      if (!SB_ON) return Promise.resolve();
+      return sbRpc('public_clips', { p_limit: 30 }).then(function (rows) {
+        rows = rows || [];
+        if (!rows.length) return [];
+        var paths = []; rows.forEach(function (r) { paths.push(r.video_path); if (r.poster_path) paths.push(r.poster_path); });
+        return sbReq('/storage/v1/object/sign/clips', { method: 'POST', body: { expiresIn: 21600, paths: paths } }).then(function (signed) {
+          var url = {};
+          (signed || []).forEach(function (x) { var u = x && !x.error && (x.signedURL || x.signedUrl); if (u) url[x.path] = /^https?:/.test(u) ? u : CFG.url + '/storage/v1' + u; });
+          return rows.filter(function (r) { return url[r.video_path]; }).map(function (r) { r._url = url; return r; });
+        });
+      }).then(function (rows) {
+        var me = member('artist');
+        box.innerHTML = rows.map(function (r) { return clipPost(r, r._url, !!(me && me.id === r.artist_id)); }).join('');
+        box.hidden = !rows.length; demo(!rows.length);
+        bind(); autoVideos(box); if (after) after();
+      }).catch(function () { /* 서버에 닿지 못하면 예시 피드만 보여 준다 */ });
+    }
+    // 올리기 화면
+    var fab = $('#fab-clip'), cu = {};
+    function cuErr(m) { var e = $('#cu-err'); if (e) { e.hidden = !m; e.textContent = m || ''; } }
+    function cuState() { var b = $('#cu-submit'); if (b && !cu.busy) b.disabled = !(cu.file && cu.dur && $('#cu-agree').checked); }
+    function cuReset() {
+      if (cu.url) URL.revokeObjectURL(cu.url);
+      cu = {};
+      var v = $('#cu-video'); v.removeAttribute('src'); try { v.load(); } catch (x) { /* 무시 */ }
+      $('#cu-file').value = ''; $('#cu-prev').hidden = true; $('#cu-meta').hidden = true; $('#cu-bar').hidden = true;
+      $('#cu-cap').value = ''; $('#cu-agree').checked = false; $('span', $('#cu-pick')).textContent = '영상 고르기';
+      cuErr(''); cuState();
+    }
+    if ($('#cu-file')) {
+      $('#cu-file').addEventListener('change', function () {
+        var f = this.files && this.files[0], ext = f ? clipExt(f) : '';
+        cu.file = null; cu.dur = 0; cu.poster = null; cuErr(''); $('#cu-meta').hidden = true; cuState();
+        if (!f) return;
+        if (!ext) { cuErr('mp4 · mov · webm 영상만 올릴 수 있어요'); return; }
+        if (f.size > CLIP_MB * 1048576) { cuErr('영상이 너무 커요 (' + Math.round(f.size / 1048576) + 'MB). 30MB 이하로 올려 주세요. 카메라 화질을 1080p로 바꾸면 크기가 줄어요'); return; }
+        if (cu.url) URL.revokeObjectURL(cu.url);
+        cu.url = URL.createObjectURL(f);
+        var v = $('#cu-video'), my = cu.url;
+        $('#cu-prev').hidden = false; $('span', $('#cu-pick')).textContent = '다른 영상 고르기';
+        readDuration(v, my).then(function (d) {
+          if (cu.url !== my) return;
+          if (d > CLIP_MAX) { cuErr('15초 이내 영상만 올릴 수 있어요 (지금 ' + secLabel(d) + '). 휴대폰 갤러리의 ‘편집’에서 15초 이내로 잘라 주세요'); return; }
+          cu.file = f; cu.dur = d; cu.ext = ext;
+          var meta = $('#cu-meta'); meta.hidden = false; meta.textContent = '길이 ' + secLabel(d) + ' · ' + (f.size / 1048576).toFixed(1) + 'MB';
+          cuState();
+          return grabPoster(v, d).then(function (b) { if (cu.url === my) cu.poster = b; });
+        }).catch(function () { if (cu.url === my) cuErr('이 영상은 열 수 없어요. 휴대폰 기본 카메라로 찍은 mp4 영상으로 올려 주세요'); });
+      });
+      $('#cu-agree').addEventListener('change', cuState);
+      $('#cu-submit').addEventListener('click', function () {
+        var m = member('artist'), btn = this; if (!m || !cu.file || cu.busy) return;
+        var base = m.id + '/' + uid(), vpath = base + '.' + cu.ext, ppath = cu.poster ? base + '.jpg' : null;
+        var bar = $('#cu-bar'), bi = $('i', bar);
+        cu.busy = true; busy(btn, true); btn.textContent = '올리는 중…'; cuErr(''); bar.hidden = false; bi.style.width = '3%';
+        sbPut('clips', vpath, cu.file, CLIP_TYPE[cu.ext], function (p) { bi.style.width = Math.max(3, Math.round(p * 90)) + '%'; })
+          .then(function () { return ppath ? sbPut('clips', ppath, cu.poster, 'image/jpeg').catch(function () { ppath = null; }) : null; })
+          .then(function () { return sbRpc('post_clip', { p_id: m.id, p_token: m.token, p_video: vpath, p_poster: ppath, p_caption: $('#cu-cap').value.trim() || null, p_duration: Math.round(cu.dur * 100) / 100 }); })
+          .then(function () {
+            bi.style.width = '100%'; cu.busy = false; busy(btn, false);
+            closeSheet($('#sheet-clip')); cuReset(); toast('피드에 올렸어요');
+            var rb = $('#feed-tabs [data-v="rec"]'); if (rb && rb.getAttribute('aria-pressed') !== 'true') rb.click();
+            load().then(function () { window.scrollTo(0, 0); });
+          }, function (e) { cu.busy = false; busy(btn, false); bar.hidden = true; cuErr(clipErr(e)); cuState(); });
+      });
+    }
+    if (fab) fab.addEventListener('click', function () {
+      var m = member('artist');
+      if (!m || !SB_ON) { openSheet('sheet-upload'); return; }
+      fab.disabled = true;
+      sbRpc('my_profile', { p_kind: 'artist', p_id: m.id, p_token: m.token }).then(function (rows) {
+        var p = rows && rows[0];
+        if (!p) { openSheet('sheet-upload'); return; }
+        if (p.status !== 'approved') { toast(p.status === 'rejected' ? '등록이 반려돼 영상을 올릴 수 없어요. 운영팀에 문의해 주세요' : '프로필 승인 대기 중이에요. 승인되면 영상을 올릴 수 있어요'); return; }
+        cuReset(); openSheet('sheet-clip');
+      }, function () { toast('서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요'); }).then(function () { fab.disabled = false; });
+    });
+    load();
+  }
 
   PAGES.artist = function () {
     var r = bindFan();
@@ -1297,6 +1510,10 @@
     q.delete('member');
     try { history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q.toString() : '') + location.hash); } catch (e) { /* 주소 변경 불가 */ }
   })();
+  // 안드로이드 앱(홈 화면 아이콘)으로 열면: 이미 역할을 고른 사람은 첫 화면을 건너뛰고 홈으로
+  if (page === 'intro' && new URLSearchParams(location.search).get('source') === 'app' && ROLE_LABEL[st('role')] && !location.hash) { location.replace('home.html'); return; }
+  // 오프라인일 때 안내 화면 (https 사이트에서만 등록)
+  if ('serviceWorker' in navigator && location.protocol === 'https:') { try { navigator.serviceWorker.register('sw.js').catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ } }
   if (PAGES[page]) PAGES[page]();
   autoVideos();
   loadRemote();
