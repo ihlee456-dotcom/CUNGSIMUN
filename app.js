@@ -207,22 +207,52 @@
   function savedWhere(where) { if (where === 'local') toast('서버에 연결하지 못해 이 기기에만 저장했어요'); }
   var FEAT = {};
 
-  /* ---------- 공연 일정 ---------- */
-  function scheduleDates(from, n) {
+  /* ---------- 공연 일정: 컨택싱어에 등록한 여러 매장 (데이터베이스) + 행2PM8PM 기본 일정 ----------
+     데이터베이스에 행2PM8PM 일정이 있으면 그것을 쓰고, 없으면 앱에 들어 있던 일정을 그대로 쓴다. */
+  var HANG = '행2PM8PM', HANG_AREA = '서울 중구 을지로', SHOWS_KEY = 'csm-shows';
+  function isHang(v) { return String(v || '').replace(/\s/g, '').toLowerCase().indexOf('행2pm8pm') >= 0; }
+  D.shows.forEach(function (s) { s.v = s.v || HANG; s.area = s.area || HANG_AREA; });
+  var STATIC_SHOWS = D.shows.slice(), SHOWS_FROM_DB = false;
+  function showOrder(a, b) { return (a.d + (a.t || '99') + (a.v || '')) < (b.d + (b.t || '99') + (b.v || '')) ? -1 : 1; }
+  function applyShows(rows) {
+    var db = (rows || []).map(function (r) {
+      return { id: r.id, d: r.show_date, t: r.show_time || '', p: r.part || '', a: r.kind === 'rental' ? '' : (r.artist_name || ''), aid: r.artist_id || null,
+               v: r.venue_name || '', vid: r.venue_id || null, area: r.area || '', type: r.kind === 'rental' ? 'rental' : 'show' };
+    });
+    SHOWS_FROM_DB = db.length > 0;
+    var hasHang = db.some(function (s) { return isHang(s.v); });
+    D.shows = (hasHang ? [] : STATIC_SHOWS).concat(db).sort(showOrder);
+  }
+  function loadShows() {
+    if (!SB_ON) return Promise.resolve();
+    var c = store.get(SHOWS_KEY, null);
+    if (c && c.day === TODAY && c.rows) applyShows(c.rows);          // 지난번 받아 둔 일정으로 먼저 그린다
+    return sbRpc('public_shows', { p_from: TODAY, p_days: 45 }).then(function (rows) {
+      store.set(SHOWS_KEY, { day: TODAY, rows: rows || [] }); applyShows(rows);
+    }, function () { /* 서버에 닿지 못하면 기본 일정 */ });
+  }
+  function scheduleDates(from, n, pick) {
     var ds = [];
-    D.shows.forEach(function (s) { if (s.d >= from && ds.indexOf(s.d) < 0) ds.push(s.d); });
+    D.shows.forEach(function (s) { if (s.d >= from && (!pick || pick(s)) && ds.indexOf(s.d) < 0) ds.push(s.d); });
     ds.sort();
     return ds.slice(0, n);
   }
-  function showsOn(d) { return D.shows.filter(function (s) { return s.d === d; }); }
-  function isRental(d) { var l = showsOn(d); return l.length > 0 && l.every(function (s) { return s.type === 'rental'; }); }
-  function nextShow() {
-    var l = D.shows.filter(function (s) { return s.d >= TODAY && s.type !== 'rental'; });
-    l.sort(function (a, b) { return (a.d + a.t) < (b.d + b.t) ? -1 : 1; });
+  function showsOn(d, pick) { return D.shows.filter(function (s) { return s.d === d && (!pick || pick(s)); }); }
+  function isRental(d, pick) { var l = showsOn(d, pick); return l.length > 0 && l.every(function (s) { return s.type === 'rental'; }); }
+  function nextShow(pick) {
+    var l = D.shows.filter(function (s) { return s.d >= TODAY && s.type !== 'rental' && (!pick || pick(s)); });
+    l.sort(showOrder);
     return l[0] || null;
   }
   function who(s) { return s.a || '출연자 미정'; }
-  function bookHref(s) { return 'booking.html?d=' + s.d + '&t=' + encodeURIComponent(s.t); }
+  function bookHref(s) { return s.id ? 'booking.html?show=' + encodeURIComponent(s.id) : 'booking.html?d=' + s.d + '&t=' + encodeURIComponent(s.t); }
+  // 동네: 주소에서 '○○구' (없으면 앞 두 단어)
+  function areaOf(s) {
+    var a = String((s && s.area) || '').trim(), m = a.match(/([가-힣]{1,4}[구군시])(?:\s|$)/g);
+    if (m) { var last = m[m.length - 1].trim(); if (/구$|군$/.test(last)) return last; }
+    return a.split(/\s+/).slice(0, 2).join(' ') || '기타';
+  }
+  function venueLine(s) { return (s.v || HANG) + ' · ' + areaOf(s) + (isHang(s.v) ? ' · 무료 라이브' : ''); }
 
   /* ---------- 팬 등급 ---------- */
   var VISIT = [[1, '첫 직관'], [5, '단골'], [15, '찐단골'], [30, '개근']];
@@ -270,10 +300,15 @@
     check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     lock: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
     chev: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9.5 5.5 6.5 6.5-6.5 6.5"/></svg>',
+    ticket: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5v-2A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v2a3.5 3.5 0 0 0 0 7v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-2a3.5 3.5 0 0 0 0-7Z"/><path d="M14 5v14" stroke-dasharray="2 2.5"/></svg>',
     mute: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="m16 9.5 5 5M21 9.5l-5 5"/></svg>',
     sound: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4Z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
     share: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M5 13v6h14v-6"/></svg>',
-    gift: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8S10.5 3.5 8 4.2 8.5 8 12 8Zm0 0s1.5-4.5 4-3.8S15.5 8 12 8Z"/></svg>'
+    gift: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8S10.5 3.5 8 4.2 8.5 8 12 8Zm0 0s1.5-4.5 4-3.8S15.5 8 12 8Z"/></svg>',
+    ig: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1" fill="currentColor" stroke="none"/></svg>',
+    yt: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5.5" width="19" height="13" rx="4"/><path d="m10 9.2 5 2.8-5 2.8Z" fill="currentColor" stroke="none"/></svg>',
+    play: '<svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5Z" fill="currentColor"/></svg>',
+    heart: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20Z"/></svg>'
   };
   var toastTimer;
   function toast(msg) {
@@ -347,30 +382,43 @@
   }
 
   /* ---------- 공연 현황판 (홈) ---------- */
-  function chipHtml(d, on) {
-    return '<button type="button" class="dchip' + (isRental(d) ? ' empty-day' : '') + '" aria-pressed="' + on + '" data-d="' + d + '" aria-label="' + dayLabel(d) + '"><small>' + rel(d) + '</small><b>' + md(d) + '</b></button>';
+  function chipHtml(d, on, pick) {
+    return '<button type="button" class="dchip' + (isRental(d, pick) ? ' empty-day' : '') + '" aria-pressed="' + on + '" data-d="' + d + '" aria-label="' + dayLabel(d) + '"><small>' + rel(d) + '</small><b>' + md(d) + '</b></button>';
   }
-  function rowsHtml(d) {
-    var l = showsOn(d);
+  function rowsHtml(d, pick) {
+    var l = showsOn(d, pick);
     if (!l.length) return '<li class="empty">이날은 공연이 없어요</li>';
     return l.map(function (s) {
-      if (s.type === 'rental') return '<li class="empty">대관일이라 일반 공연이 없어요</li>';
+      if (s.type === 'rental') return '<li class="empty">' + esc(s.v || HANG) + ' 대관일이라 일반 공연이 없어요</li>';
       return '<li class="show"><span class="tm"><b>' + esc(s.t) + '</b><small>' + esc(s.p || '') + '</small></span>' +
-        '<span class="in"><b>' + esc(who(s)) + '</b><small>행2PM8PM · 을지로 · 무료 라이브</small></span>' +
+        '<span class="in"><b>' + (s.aid ? '<a href="singer.html?id=' + encodeURIComponent(s.aid) + '" style="color:inherit">' + esc(who(s)) + '</a>' : esc(who(s))) + '</b><small>' + esc(venueLine(s)) + '</small></span>' +
         '<a class="btn sm go" href="' + bookHref(s) + '" aria-label="' + esc(dayLabel(s.d) + ' ' + s.t + ' ' + who(s)) + ' 예약">예약</a></li>';
     }).join('');
   }
+  // 공연 현황판: 동네 고르기 → 날짜 → 그날 공연 (여러 매장)
   function board(root) {
     if (!root) return;
-    var chips = $('.dates', root), list = $('.shows', root), dates = scheduleDates(TODAY, 7);
-    if (!dates.length) { chips.innerHTML = ''; list.innerHTML = '<li class="empty">다음 공연 일정이 곧 올라와요</li>'; return; }
-    var cur = dates[0];
+    var chips = $('.dates', root), list = $('.shows', root), areasEl = $('.areas', root);
+    var areas = [];
+    D.shows.forEach(function (s) { if (s.d >= TODAY) { var a = areaOf(s); if (areas.indexOf(a) < 0) areas.push(a); } });
+    var area = st('area', '');
+    if (areas.indexOf(area) < 0) area = '';
+    function pick(s) { return !area || areaOf(s) === area; }
+    var dates, cur;
     function draw(focus) {
-      chips.innerHTML = dates.map(function (d) { return chipHtml(d, d === cur); }).join('');
-      list.innerHTML = rowsHtml(cur);
+      if (areasEl) {
+        areasEl.hidden = areas.length < 2;
+        areasEl.innerHTML = ['전체'].concat(areas).map(function (a) { var v = a === '전체' ? '' : a; return '<button type="button" class="chip" data-area="' + esc(v) + '" aria-pressed="' + (v === area) + '">' + esc(a) + '</button>'; }).join('');
+      }
+      dates = scheduleDates(TODAY, 7, pick);
+      if (!dates.length) { chips.innerHTML = ''; list.innerHTML = '<li class="empty">다음 공연 일정이 곧 올라와요</li>'; return; }
+      if (dates.indexOf(cur) < 0) cur = dates[0];
+      chips.innerHTML = dates.map(function (d) { return chipHtml(d, d === cur, pick); }).join('');
+      list.innerHTML = rowsHtml(cur, pick);
       if (focus) { var b = $('[data-d="' + cur + '"]', chips); if (b) b.focus(); }
     }
     chips.addEventListener('click', function (e) { var b = e.target.closest('.dchip'); if (!b) return; cur = b.getAttribute('data-d'); draw(true); });
+    if (areasEl) areasEl.addEventListener('click', function (e) { var b = e.target.closest('[data-area]'); if (!b) return; area = b.getAttribute('data-area'); put('area', area); draw(false); });
     draw(false);
   }
 
@@ -392,7 +440,7 @@
       if (!requireFields(form, req)) return;
       if (!agreeOk(agreeId)) return;
       if (FEAT.signup === false) { toast('지금은 신규 등록을 잠시 쉬고 있어요. 건너뛰고 둘러보세요'); return; }
-      var data = collect(); data.at = TODAY;
+      var data = collect(); if (!data) return; data.at = TODAY;
       var btn = $('button[type="submit"]', form), rm = remote(data);
       busy(btn, true);
       saveMember(rm[0], rm[1]).then(function (where) {
@@ -418,6 +466,7 @@
     vids.forEach(function (v) { VIO.observe(v); });
   }
 
+  var GUIDE_KEY = 'csm-guide-seen';
   PAGES.intro = function () {
     var pick = $('#step-pick'), info = $('#step-info'), load = $('#step-load');
     if (!pick) return;
@@ -446,14 +495,28 @@
       var tpl = $('#av-tpl'), slot = $('#load-av');
       if (tpl && slot && tpl.content) { slot.innerHTML = ''; slot.appendChild(tpl.content.querySelector('.av-' + r).cloneNode(true)); }
       $('#load-name').textContent = ROLE_LABEL[r] + (profileName(r) ? ' · ' + profileName(r) : '');
+      // 기다리는 동안 이 역할이 앱에서 할 일 3가지를 보여 준다. 처음 보는 역할이면 조금 더 길게(7초), 다음부터는 5초.
+      var seen = store.get(GUIDE_KEY, {}) || {}, first = !seen[r], DUR = first ? 7000 : 5000;
+      var guide = $('#ld-guide'), items = [], skip = $('#ld-skip');
+      $$('[data-guide]', load).forEach(function (g) { g.hidden = g.getAttribute('data-guide') !== r; if (!g.hidden) items = $$('li', g); });
+      if (guide) guide.hidden = !items.length;
+      load.classList.toggle('has-guide', items.length > 0);
+      items.forEach(function (li) { li.classList.remove('on', 'done'); });
+      seen[r] = 1; store.set(GUIDE_KEY, seen);
       show('load');
-      var pct = $('#sp-pct'), fill = $('#sp-fill'), bar = $('#sp-bar'), DUR = 5000, t0 = null, gone = false;
+      var pct = $('#sp-pct'), fill = $('#sp-fill'), bar = $('#sp-bar'), t0 = null, gone = false;
       function go() { if (gone) return; gone = true; location.replace('home.html'); }
+      if (skip) { skip.hidden = false; skip.onclick = go; }
+      function mark(k) {
+        var n = items.length, cur = Math.min(n - 1, Math.floor(k * n));
+        items.forEach(function (li, i) { li.classList.toggle('on', i === cur && k < 1); li.classList.toggle('done', i < cur || k >= 1); });
+      }
       function step(ts) {
         if (t0 === null) t0 = ts;
         var k = Math.min(1, (ts - t0) / DUR), v = Math.max(1, Math.round(k * 100));
         pct.textContent = v; fill.style.width = v + '%'; bar.setAttribute('aria-valuenow', v);
-        if (k < 1) requestAnimationFrame(step); else setTimeout(go, 300);
+        if (items.length) mark(k);
+        if (k < 1) requestAnimationFrame(step); else setTimeout(go, 400);
       }
       requestAnimationFrame(step);
       setTimeout(go, DUR + 1500);
@@ -495,6 +558,7 @@
     drawLogin();
     if (fromKakao) {
       show('load'); $('#load-name').textContent = '카카오 정보 확인 중'; $('.sp-msg', load).textContent = '카카오 로그인 중';
+      $('#ld-guide').hidden = true; $('#ld-skip').hidden = true; load.classList.remove('has-guide');
       afterKakao().then(function (res) {
         var intent = store.get('csm-kakao-intent', null) || {}; store.set('csm-kakao-intent', null);
         var r = ROLE_LABEL[intent.role] ? intent.role : '', back = /^[a-z-]+\.html$/.test(intent.back || '') ? intent.back : '';
@@ -519,10 +583,11 @@
     }, function (d) {
       return ['venue', { source: 'quick', venue_name: d.venue, owner_name: d.owner, phone: d.phone, area: d.area || null, styles: d.styles, open_days: d.days }];
     }, startLoad);
-    setupRoleForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-link': 'link' }, function () {
-      return { name: val('pa-name'), phone: val('pa-phone'), lineup: picked($('#pa-lineup'))[0] || '', genres: picked($('#pa-genres')), link: val('pa-link') };
+    setupRoleForm('artist', ['pa-name', 'pa-phone'], 'pa-agree', { 'pa-name': 'name', 'pa-phone': 'phone', 'pa-insta': 'instagram', 'pa-yt': 'youtube' }, function () {
+      var sns = snsCheck('pa'); if (!sns) return null;
+      return { name: val('pa-name'), phone: val('pa-phone'), lineup: picked($('#pa-lineup'))[0] || '', genres: picked($('#pa-genres')), link: '', instagram: sns.instagram, youtube: sns.youtube };
     }, function (d) {
-      return ['artist', { source: 'quick', name: d.name, phone: d.phone, lineup: d.lineup || null, genres: d.genres, link: d.link || null }];
+      return ['artist', { source: 'quick', name: d.name, phone: d.phone, lineup: d.lineup || null, genres: d.genres, details: { instagram: d.instagram || '', youtube: d.youtube || '' } }];
     }, startLoad);
     var edit = new URLSearchParams(location.search).get('edit');
     if (edit && ROLE_LABEL[edit]) openInfo(edit);
@@ -557,36 +622,84 @@
     if (role === 'venue' || role === 'artist') {
       memberStatus(role, view).then(function (pr) {
         if (pr && g && !p) g.textContent = role === 'venue' ? pr.name + ' 사장님, 반가워요' : pr.name + '님, 반가워요';
+        if (role === 'venue') venueHome(pr); else artistHome(pr);
       });
       if (role === 'artist') loadPublicList('artist', view);
       loadInbox(role, view);
     }
   };
 
-  /* ---------- 내 예약 (상태는 서버에서) ---------- */
-  var BSTATUS = { requested: ['신청됨', 'wait'], confirmed: ['예약 확정', 'yes'], declined: ['예약 불가', 'no'], cancelled: ['취소됨', 'done'],
-                  visited: ['방문 완료', 'yes'], noshow: ['노쇼', 'no'], local: ['이 기기에만 저장', 'done'] };
+  /* ---------- 내 예약 (상태는 서버에서): 홈 맨 위 · 예약 화면 위 · 내 예약 화면 ---------- */
+  var BSTATUS = { requested: ['확인 중', 'wait'], confirmed: ['예약 확정', 'yes'], declined: ['예약 불가', 'no'], cancelled: ['취소됨', 'done'],
+                  visited: ['방문 완료', 'yes'], noshow: ['노쇼', 'no'], local: ['전달 안 됨', 'no'] };
+  var BNOTE = { requested: '매장에서 확인하고 있어요 · 확정되면 알림톡으로 알려 드려요', confirmed: '자리가 준비됐어요 · 공연 시간에 맞춰 방문해 주세요',
+                declined: '이번에는 예약이 어려워요 · 매장 답변을 확인해 주세요', cancelled: '취소된 예약이에요', visited: '다녀가 주셔서 감사해요',
+                noshow: '방문 기록이 없는 예약이에요', local: '인터넷이 끊겨 매장에 전달되지 않았어요 · 다시 신청해 주세요' };
+  function bookCode(ref) { return String(ref || '').replace(/-/g, '').slice(0, 6).toUpperCase(); }
+  function myBookingsLocal() { return store.get(BOOK_KEY, []) || []; }
+  function isUpcoming(b) { return b.d ? b.d >= TODAY : (b.at || TODAY) >= addDays(TODAY, -30); }
+  function splitBookings(all) {
+    var up = all.filter(isUpcoming).sort(function (a, b) { return ((a.d || '9') + (a.t || '')) < ((b.d || '9') + (b.t || '')) ? -1 : 1; });
+    var past = all.filter(function (b) { return !isUpcoming(b); }).sort(function (a, b) { return (a.d || '') < (b.d || '') ? 1 : -1; });
+    return { up: up, past: past };
+  }
+  // 서버에서 최신 상태 받기: 이 기기에서 신청한 예약 번호 + (손님 정보를 등록했다면) 다른 기기에서 신청한 예약
+  function refreshBookings() {
+    var all = myBookingsLocal();
+    if (!SB_ON) return Promise.resolve(all);
+    var refs = all.filter(function (b) { return b.ref && b.status !== 'local'; }).map(function (b) { return b.ref; }).slice(-50), fm = member('fan');
+    return Promise.all([
+      refs.length ? sbRpc('my_bookings', { p_refs: refs }).catch(function () { return null; }) : Promise.resolve([]),
+      fm ? sbRpc('my_fan_bookings', { p_id: fm.id, p_token: fm.token }).catch(function () { return null; }) : Promise.resolve([])
+    ]).then(function (r) {
+      if (!r[0] && !r[1]) return all;
+      var byRef = {}; all.forEach(function (b) { if (b.ref) byRef[b.ref] = b; });
+      (r[0] || []).concat(r[1] || []).forEach(function (x) {
+        var b = byRef[x.ref];
+        if (!b) { b = { ref: x.ref, at: String(x.created_at || '').slice(0, 10) }; all.push(b); byRef[x.ref] = b; }
+        b.kind = x.kind; b.d = x.show_date; b.t = x.show_time || ''; b.a = x.artist || (x.kind === 'rent' ? '대관 견적' : ''); b.ppl = x.people;
+        b.status = x.status; b.reply = x.reply || ''; if (x.venue_name) b.v = x.venue_name;
+      });
+      store.set(BOOK_KEY, all.slice(-60));
+      return all;
+    });
+  }
+  function bookCardHtml(b) {
+    var st = BSTATUS[b.status] || BSTATUS.requested;
+    var when = b.kind === 'rent' ? '대관 견적' + (b.d ? ' · ' + dayLabel(b.d) : '') : ((b.d === TODAY ? '오늘 ' : '') + (b.d ? dayLabel(b.d) : '') + (b.t ? ' ' + b.t : '')).trim();
+    var sub = [b.v || HANG, b.kind !== 'rent' && b.a ? b.a : '', b.ppl ? b.ppl + '명' : ''].filter(Boolean).join(' · ');
+    return '<article class="mybk' + (b.status === 'confirmed' ? ' is-yes' : '') + '" data-ref="' + esc(b.ref || '') + '">' +
+      '<div class="mb-top"><div class="stack" style="gap:2px;min-width:0"><span class="mb-when">' + esc(when || '날짜 협의') + '</span><span class="mb-sub">' + esc(sub) + '</span></div><span class="pill ' + st[1] + '">' + esc(st[0]) + '</span></div>' +
+      '<span class="mb-msg">' + esc(BNOTE[b.status] || BNOTE.requested) + '</span>' +
+      (b.reply ? '<div class="mb-reply"><b>매장 답변</b> ' + esc(b.reply) + '</div>' : '') +
+      (b.status === 'local' ? '<a class="btn sm" href="booking.html" style="align-self:flex-start">다시 신청하기</a>'
+        : (b.ref ? '<span class="mb-code">예약번호 ' + bookCode(b.ref) + (b.at ? ' · ' + md(b.at) + ' 신청' : '') + '</span>' : '')) + '</article>';
+  }
+  // 홈(손님) 맨 위: 다가오는 예약 3건
   function drawMyBookings(box) {
     if (!box) return;
-    var all = store.get(BOOK_KEY, []) || [];
-    var mine = all.filter(function (b) { return !b.d || b.d >= addDays(TODAY, -1); }).slice(-6).reverse();
-    if (!mine.length) return;
-    function paint() {
-      box.hidden = false;
-      $('ul', box).innerHTML = mine.slice(0, 4).map(function (b) {
-        var stt = BSTATUS[b.status] || ['예약됨', 'yes'];
-        return '<li><span class="t"><b>' + esc((b.d ? dayLabel(b.d) + ' ' : '') + (b.t ? b.t + ' · ' : '') + (b.a || '')) + '</b><span>' + esc('행2PM8PM · ' + b.ppl + '명' + (b.kind === 'rent' ? ' · 대관 견적' : '')) + '</span>' +
-          (b.reply ? '<span style="color:var(--accent-text)">' + esc('매장 답변: ' + b.reply) + '</span>' : '') + '</span><span class="pill ' + stt[1] + '">' + esc(stt[0]) + '</span></li>';
-      }).join('');
+    var listEl = $('#mb-home-list', box);
+    function paint(all) {
+      var up = splitBookings(all).up.slice(0, 3);
+      box.hidden = !up.length;
+      if (listEl) listEl.innerHTML = up.map(bookCardHtml).join('');
     }
-    paint();
-    var refs = mine.filter(function (b) { return b.ref && b.status !== 'local'; }).map(function (b) { return b.ref; });
-    if (!refs.length || !SB_ON) return;
-    sbRpc('my_bookings', { p_refs: refs }).then(function (rows) {
-      var by = {}; (rows || []).forEach(function (r) { by[r.ref] = r; });
-      all.forEach(function (b) { var r = by[b.ref]; if (r) { b.status = r.status; b.reply = r.reply || ''; } });
-      store.set(BOOK_KEY, all); paint();
-    }, function () { /* 서버 연결 불가: 저장된 상태로 */ });
+    paint(myBookingsLocal());
+    refreshBookings().then(paint, function () { /* 저장된 상태로 */ });
+  }
+  // 예약 화면 위: 내 예약 요약 (누르면 내 예약 화면)
+  function drawBookSummary() {
+    var el = $('#b-mine'); if (!el) return;
+    function paint(all) {
+      var up = splitBookings(all).up;
+      el.hidden = !up.length; if (!up.length) return;
+      var yes = up.filter(function (b) { return b.status === 'confirmed'; }).length, wait = up.filter(function (b) { return b.status === 'requested'; }).length;
+      var next = up[0];
+      el.innerHTML = '<span style="color:var(--accent);flex:none">' + ICON.ticket + '</span><span style="flex:1;min-width:0"><b>내 예약 ' + up.length + '건</b>' +
+        '<span class="tiny">' + esc([yes ? '확정 ' + yes : '', wait ? '확인 중 ' + wait : ''].filter(Boolean).join(' · ') + (next && next.d ? ' · 가장 가까운 예약 ' + dayLabel(next.d) + (next.t ? ' ' + next.t : '') : '')) + '</span></span>' + ICON.chev;
+    }
+    paint(myBookingsLocal());
+    refreshBookings().then(paint, function () {});
   }
 
   /* ---------- 컨택: 가수 ↔ 라이브바 (보내기 · 받기 · 수락/거절) ---------- */
@@ -628,6 +741,7 @@
       '<div class="stack" style="gap:3px"><h3>' + esc(name) + '</h3><span class="tiny">' + esc(meta || '컨택싱어 승인 ' + (kind === 'artist' ? '매장' : '가수')) + '</span></div>' +
       (tags.length ? '<div class="chips">' + tags.map(function (t) { return '<span class="tag">' + esc(t) + '</span>'; }).join('') + '</div>' : '') +
       (x.bio ? '<p class="why">' + esc(x.bio) + '</p>' : '') +
+      (kind === 'venue' && snsHtml(x) ? '<div class="sns-row">' + snsHtml(x) + '</div>' : '') +
       '<div class="row" style="gap:8px">' + (link ? '<a class="btn ghost sm" href="' + esc(link) + '" target="_blank" rel="noopener">공연 영상 · 음원</a>' : '') +
       '<button type="button" class="btn ' + (sentId ? 'outline ' : '') + (link ? 'sm' : 'block') + '" style="flex:1" data-contact-to="' + esc(x.id) + '" data-name="' + esc(name) + '"' + (sentId ? ' disabled' : '') + '>' +
       (sentId ? '컨택 보냄 · 답 기다리는 중' : (kind === 'artist' ? '이 무대에 컨택하기' : '컨택 요청')) + '</button></div></article>';
@@ -813,7 +927,7 @@
     if (q > 1 && CL[i]) { v.src = '' + CL[i].src; v.poster = '' + CL[i].poster; v.play && v.play().catch(function () {}); }
     setClip(i, true);
     var sh = $('#share'); if (sh) sh.addEventListener('click', function () { share('컨택싱어 · 행2PM8PM ' + cur().title); });
-    var ns = nextShow(), box = $('#tonight');
+    var ns = nextShow(function (x) { return isHang(x.v); }), box = $('#tonight');
     if (box && ns) {
       $('[data-k="head"]', box).textContent = ns.d === TODAY ? '이 무대, 오늘 밤에도 열려요' : '이 무대의 다음 공연 · ' + dayLabel(ns.d);
       $('[data-k="line"]', box).textContent = '행2PM8PM · ' + ns.t + ' ' + who(ns);
@@ -822,32 +936,62 @@
   };
 
   PAGES.booking = function () {
-    var q = new URLSearchParams(location.search), qd = q.get('d'), qt = q.get('t');
-    var dates = scheduleDates(TODAY, 7);
-    if (qd && qd >= TODAY && dates.indexOf(qd) < 0 && showsOn(qd).length) dates = scheduleDates(qd, 7);
+    var q = new URLSearchParams(location.search), qd = q.get('d'), qt = q.get('t'), qs = q.get('show');
+    // 매장: 공연이 있는 매장들 (행2PM8PM 먼저)
+    var venues = [];
+    D.shows.forEach(function (s) { if (s.d >= TODAY && s.type !== 'rental' && !venues.some(function (x) { return x.v === s.v; })) venues.push({ v: s.v, vid: s.vid, area: s.area }); });
+    venues.sort(function (a, b) { return isHang(a.v) ? -1 : isHang(b.v) ? 1 : 0; });
+    var qShow = qs ? D.shows.filter(function (s) { return s.id === qs; })[0] : null;
+    var curV = qShow ? qShow.v : (venues[0] ? venues[0].v : HANG);
+    if (qShow) { qd = qShow.d; qt = qShow.t; }
+    function pickV(s) { return s.v === curV; }
+    var dates;
+    function calcDates() {
+      dates = scheduleDates(TODAY, 7, pickV);
+      if (qd && qd >= TODAY && dates.indexOf(qd) < 0 && showsOn(qd, pickV).length) dates = scheduleDates(qd, 7, pickV);
+    }
+    calcDates();
+    // 처음 고르는 날짜: 대관일을 건너뛰고 예약할 수 있는 공연이 있는 첫날
+    function firstDay() { for (var i = 0; i < dates.length; i++) { if (showsOn(dates[i], pickV).some(function (s) { return s.type !== 'rental'; })) return dates[i]; } return dates[0]; }
     var f = fan(), vg = grade(VISIT, f.visits);
-    var mode = 'watch', day = (qd && dates.indexOf(qd) >= 0) ? qd : dates[0], si = 0, ppl = 2;
-    if (qt && day === qd) { var idx = showsOn(day).filter(function (s) { return s.type !== 'rental'; }).map(function (s) { return s.t; }).indexOf(qt); if (idx >= 0) si = idx; }
+    var mode = 'watch', day = (qd && dates.indexOf(qd) >= 0) ? qd : firstDay(), si = 0, ppl = 2;
+    if (qt && day === qd) { var idx = showsOn(day, pickV).filter(function (s) { return s.type !== 'rental'; }).map(function (s) { return s.t; }).indexOf(qt); if (idx >= 0) si = idx; }
     var daysEl = $('#b-days'), showsEl = $('#b-shows'), cta = $('#b-cta');
     single($('#b-mode'), function (b) { mode = b.getAttribute('data-v'); draw(); });
+    function drawVenue() {
+      var box = $('#b-venue-box'), vEl = $('#b-venues'), info = venues.filter(function (x) { return x.v === curV; })[0] || { v: curV, area: HANG_AREA };
+      if (box) box.hidden = venues.length < 2;
+      if (vEl) vEl.innerHTML = venues.map(function (x) { return '<button type="button" class="chip" data-venue="' + esc(x.v) + '" aria-pressed="' + (x.v === curV) + '">' + esc(x.v) + '</button>'; }).join('');
+      var hang = isHang(curV);
+      $('#b-vname').textContent = curV; $('#b-varea').textContent = hang ? '을지로 · 1–3층' : areaOf(info);
+      $('#b-vtags').hidden = !hang; $('#b-video').hidden = !hang;
+      var rt = $('#b-rent-tab'); if (rt) { rt.hidden = !hang; if (!hang && mode === 'rent') { mode = 'watch'; $$('#b-mode button').forEach(function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-v') === 'watch' ? 'true' : 'false'); }); } }
+    }
+    var vEl0 = $('#b-venues');
+    if (vEl0) vEl0.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-venue]'); if (!b) return;
+      curV = b.getAttribute('data-venue'); qd = null; qt = null; calcDates(); day = firstDay(); si = 0; drawVenue(); draw();
+    });
+    drawVenue();
+    drawBookSummary();
     $('#b-dec').addEventListener('click', function () { ppl = Math.max(1, ppl - 1); draw(); });
     $('#b-inc').addEventListener('click', function () { ppl = Math.min(20, ppl + 1); draw(); });
     daysEl.addEventListener('click', function (e) { var b = e.target.closest('button[data-d]'); if (!b) return; day = b.getAttribute('data-d'); si = 0; draw(); var nb = $('[data-d="' + day + '"]', daysEl); if (nb) nb.focus(); });
     showsEl.addEventListener('click', function (e) { var b = e.target.closest('button[data-i]'); if (!b) return; si = +b.getAttribute('data-i'); draw(); var nb = $('[data-i="' + si + '"]', showsEl); if (nb) nb.focus(); });
-    function list() { return day ? showsOn(day).filter(function (s) { return s.type !== 'rental'; }) : []; }
+    function list() { return day ? showsOn(day, pickV).filter(function (s) { return s.type !== 'rental'; }) : []; }
     function draw() {
       $$('[data-mode]').forEach(function (el) { el.hidden = el.getAttribute('data-mode') !== mode; });
       if (!dates.length) { daysEl.innerHTML = '<p class="empty" style="grid-column:1/-1">다음 공연 일정이 곧 올라와요</p>'; }
       else daysEl.innerHTML = dates.map(function (d) {
-        return '<button type="button" class="dchip' + (isRental(d) ? ' empty-day' : '') + '" aria-pressed="' + (d === day) + '" data-d="' + d + '" aria-label="' + dayLabel(d) + '" style="min-width:0"><small>' + rel(d) + '</small><b>' + (+d.split('-')[2]) + '</b></button>';
+        return '<button type="button" class="dchip' + (isRental(d, pickV) ? ' empty-day' : '') + '" aria-pressed="' + (d === day) + '" data-d="' + d + '" aria-label="' + dayLabel(d) + '" style="min-width:0"><small>' + rel(d) + '</small><b>' + (+d.split('-')[2]) + '</b></button>';
       }).join('');
       $('#b-day-label').textContent = day ? dayLabel(day) : '';
       var l = list(); if (si >= l.length) si = 0;
-      if (!l.length) showsEl.innerHTML = '<p class="empty">' + (day && isRental(day) ? '대관일이라 일반 공연이 없어요. 다른 날짜를 골라 주세요.' : '이날은 공연이 없어요.') + '</p>';
+      if (!l.length) showsEl.innerHTML = '<p class="empty">' + (day && isRental(day, pickV) ? '대관일이라 일반 공연이 없어요. 다른 날짜를 골라 주세요.' : '이날은 공연이 없어요.') + '</p>';
       else showsEl.innerHTML = l.map(function (s, i) {
         return '<button type="button" class="role" aria-pressed="' + (i === si) + '" data-i="' + i + '" style="flex-direction:row;align-items:center;gap:14px;min-height:64px;padding:0 16px">' +
           '<span class="mono" style="font-size:16px;font-weight:700;color:var(--accent)">' + esc(s.t) + '</span>' +
-          '<span class="r-t"><b style="font-size:15px">' + esc(who(s)) + '</b><span>' + esc((s.p || '1회 공연') + ' · 행2PM8PM') + '</span></span><span class="radio"></span></button>';
+          '<span class="r-t"><b style="font-size:15px">' + esc(who(s)) + '</b><span>' + esc((s.p || '1회 공연') + ' · ' + (s.v || HANG)) + '</span></span><span class="radio"></span></button>';
       }).join('');
       $('#b-ppl').textContent = ppl + '명';
       var total = won(ppl * 10000) + '원';
@@ -871,17 +1015,21 @@
       if (!agreeOk('b-agree')) return;
       var ref = uid(), fm = member('fan');
       var args = { p_ref: ref, p_kind: mode, p_date: s ? s.d : (day || null), p_time: s ? s.t : null, p_artist: s ? who(s) : null, p_people: ppl,
-                   p_name: val('b-name'), p_phone: val('b-phone'), p_request: val('b-req') || null, p_fan_id: fm ? fm.id : null, p_fan_token: fm ? fm.token : null };
-      var item = { ref: ref, kind: mode, d: args.p_date, t: args.p_time || '', a: args.p_artist || '대관 견적', ppl: ppl, at: TODAY, status: 'requested' };
+                   p_name: val('b-name'), p_phone: val('b-phone'), p_request: val('b-req') || null, p_fan_id: fm ? fm.id : null, p_fan_token: fm ? fm.token : null,
+                   p_show: s && s.id ? s.id : null, p_venue: s && s.vid ? s.vid : null };
+      var item = { ref: ref, kind: mode, d: args.p_date, t: args.p_time || '', a: args.p_artist || '대관 견적', v: s ? s.v : HANG, ppl: ppl, at: TODAY, status: 'requested' };
       function done(where) {
         if (where === 'local') { item.status = 'local'; toast('서버에 연결하지 못해 이 기기에만 저장했어요'); }
         var bk = store.get(BOOK_KEY, []) || []; bk.push(item); store.set(BOOK_KEY, bk);
         if (!pf.name) put('profile-fan', { name: args.p_name, phone: args.p_phone, genres: [], area: '', at: TODAY });
         if (mode === 'rent') { $('#rent-text').textContent = (day ? dayLabel(day) + ' · ' : '') + ppl + '명 대관 견적을 요청했어요.'; openSheet('sheet-rent'); }
-        else { $('#book-text').textContent = dayLabel(s.d) + ' ' + s.t + ' ' + who(s) + ' · ' + ppl + '명 예약을 신청했어요.'; openSheet('sheet-book'); }
+        else { $('#book-text').textContent = (s.v || HANG) + ' · ' + dayLabel(s.d) + ' ' + s.t + ' ' + who(s) + ' · ' + ppl + '명 예약을 신청했어요.'; openSheet('sheet-book'); }
       }
       busy(cta, true);
-      sbRpc('create_booking', args).then(function () { busy(cta, false); done('server'); }, function (e) {
+      sbRpc('create_booking', args).then(function () {
+        busy(cta, false); var bc = $('#book-code'); if (bc) { bc.hidden = false; bc.textContent = '예약번호 ' + bookCode(ref); }
+        done('server'); drawBookSummary();
+      }, function (e) {
         busy(cta, false);
         if (e && e.network) { done('local'); return; }
         toast(errMsg(e, '신청하지 못했어요. 잠시 후 다시 시도해 주세요'));
@@ -893,15 +1041,22 @@
   PAGES.tip = function () {
     var amts = [3000, 5000, 10000, 50000], ai = 2;
     var box = $('#t-artists'), inp = $('#t-artist'), foot = $('.foot[data-sms]'), smsNo = foot ? foot.getAttribute('data-sms') : '';
-    // 오늘 공연하는 뮤지션 (공연 일정에서)
-    var seen = {}, today = showsOn(TODAY).filter(function (x) { return x.type !== 'rental' && x.a && !seen[x.a] && (seen[x.a] = 1); });
-    var q = new URLSearchParams(location.search).get('to');
-    $('#t-stage').textContent = today.length ? '오늘 행2PM8PM 무대 · ' + today.map(function (x) { return x.t; }).join(', ') : '행2PM8PM 무대';
-    box.innerHTML = today.map(function (x) { return '<button type="button" class="chip" data-a="' + esc(x.a) + '" aria-pressed="false">' + esc(x.a) + '</button>'; }).join('');
+    // 오늘 공연하는 뮤지션 (여러 매장 공연 일정에서)
+    var seen = {}, today = showsOn(TODAY).filter(function (x) { return x.type !== 'rental' && x.a && !seen[x.a + '|' + x.v] && (seen[x.a + '|' + x.v] = 1); });
+    var many = today.some(function (x) { return x.v !== (today[0] || {}).v; });
+    var q = new URLSearchParams(location.search).get('to'), pickedShow = null;
+    var venuesToday = []; today.forEach(function (x) { if (venuesToday.indexOf(x.v) < 0) venuesToday.push(x.v); });
+    $('#t-stage').textContent = today.length ? '오늘 무대 · ' + venuesToday.map(function (v) { return v + ' ' + today.filter(function (x) { return x.v === v; }).map(function (x) { return x.t; }).join(', '); }).join(' / ') : '오늘 무대';
+    box.innerHTML = today.map(function (x, i) { return '<button type="button" class="chip" data-a="' + esc(x.a) + '" data-i="' + i + '" aria-pressed="false">' + esc(x.a) + (many ? ' · ' + esc(x.v) : '') + '</button>'; }).join('');
     box.hidden = !today.length;
-    function drawChips() { $$('[data-a]', box).forEach(function (c) { c.setAttribute('aria-pressed', c.getAttribute('data-a') === inp.value.trim() ? 'true' : 'false'); }); }
+    function drawChips() {
+      var name = inp.value.trim();
+      if (pickedShow && pickedShow.a !== name) pickedShow = null;
+      if (!pickedShow) pickedShow = today.filter(function (x) { return x.a === name; })[0] || null;
+      $$('[data-a]', box).forEach(function (c) { c.setAttribute('aria-pressed', pickedShow && today[+c.getAttribute('data-i')] === pickedShow ? 'true' : 'false'); });
+    }
     if (!inp.value) inp.value = (q && q.slice(0, 40)) || (today[0] ? today[0].a : '');
-    box.addEventListener('click', function (e) { var c = e.target.closest('[data-a]'); if (!c) return; inp.value = c.getAttribute('data-a'); drawChips(); });
+    box.addEventListener('click', function (e) { var c = e.target.closest('[data-a]'); if (!c) return; pickedShow = today[+c.getAttribute('data-i')]; inp.value = pickedShow.a; drawChips(); });
     inp.addEventListener('input', drawChips); drawChips();
     var pf = profileOf('fan') || {}, kp = st('kakao', null) || {};
     if (!val('t-payer')) $('#t-payer').value = kp.name || pf.name || '';
@@ -916,8 +1071,7 @@
       var gt = $('#t-goal');
       gt.textContent = !tg.next ? '이미 최고 후원 등급이에요 · 후원 1위가 되면 팬회장 뱃지' : (reach ? '이 팁으로 ' + ag.name + ' 등급 달성! ' + (ag.name === '큰손' ? '신청곡 우선권 · 사인 혜택이 열려요' : '공연 후 사진 · 인사 혜택이 열려요') : '이 팁을 보내면 ' + tg.next[1] + '까지 ' + won(goal - after) + '원 남아요');
       gt.style.color = reach ? 'var(--accent)' : 'var(--muted)';
-      var songOpen = after >= 100000 || f.visits >= 15;
-      $('#t-song').hidden = !songOpen; $('#t-song-lock').hidden = songOpen;
+      // 신청곡은 누구나 보낼 수 있어요 (팁과 함께 뮤지션에게 전달)
       $('#t-amt-text').textContent = won(amt) + '원';
       bindFan();
     }
@@ -926,23 +1080,36 @@
       (navigator.clipboard ? navigator.clipboard.writeText(no) : Promise.reject()).then(function () { toast('계좌번호를 복사했어요 · ' + no); }, function () { toast('계좌번호: ' + no); });
     });
     var lastLink = '';
-    function smsLink() {
-      var song = $('#t-song').hidden ? '' : val('t-song-in'), ns = showsOn(TODAY).filter(function (x) { return x.a === val('t-artist'); })[0];
-      var body = ['[컨택싱어 현장 팁]', '입금자명: ' + val('t-payer'), '금액: ' + won(amts[ai]) + '원', '받을 뮤지션: ' + val('t-artist'),
-                  '공연: 행2PM8PM ' + dayLabel(TODAY) + (ns ? ' ' + ns.t : '')].concat(val('t-msg') ? ['한마디: ' + val('t-msg')] : [], song ? ['신청곡: ' + song] : []).join('\n');
+    function smsLink(code) {
+      var song = val('t-song-in'), ns = pickedShow && pickedShow.a === val('t-artist') ? pickedShow : null;
+      var body = ['[컨택싱어 현장 팁]'].concat(code ? ['팁 번호: ' + code] : [], ['입금자명: ' + val('t-payer'), '금액: ' + won(amts[ai]) + '원', '받을 뮤지션: ' + val('t-artist'),
+                  '공연: ' + (ns ? ns.v : HANG) + ' ' + dayLabel(TODAY) + (ns ? ' ' + ns.t : '')], val('t-msg') ? ['한마디: ' + val('t-msg')] : [], song ? ['신청곡: ' + song] : []).join('\n');
       return 'sms:' + smsNo.replace(/[^0-9]/g, '') + '?&body=' + encodeURIComponent(body);
     }
     $('#t-send').addEventListener('click', function () {
       if (!requireFields($('main'), ['t-artist', 't-payer'])) return;
-      lastLink = smsLink();
-      var list = store.get('csm-tips', []) || [];
-      list.push({ at: TODAY, artist: val('t-artist'), amount: amts[ai], payer: val('t-payer'), status: 'sms' });
-      store.set('csm-tips', list.slice(-30));
-      $('#tip-text').textContent = '문자를 보내면 입금을 확인한 뒤 ' + val('t-artist') + '님께 ' + won(amts[ai]) + '원을 100% 그대로 전달해요.';
-      $('#tip-sms-fallback').textContent = '문자 앱이 열리지 않으면 ' + smsNo + '로 입금자명 · 금액 · 받을 뮤지션을 직접 보내 주세요.';
-      $('#tip-sms-again').setAttribute('href', lastLink);
-      openSheet('sheet-tip');
-      location.href = lastLink;
+      var btn = this, ref = uid(), ns = pickedShow && pickedShow.a === val('t-artist') ? pickedShow : null;
+      function go(code) {
+        lastLink = smsLink(code);
+        var list = store.get('csm-tips', []) || [];
+        list.push({ at: TODAY, artist: val('t-artist'), amount: amts[ai], payer: val('t-payer'), code: code || '', status: code ? 'saved' : 'sms' });
+        store.set('csm-tips', list.slice(-30));
+        $('#tip-text').textContent = '문자를 보내면 입금을 확인한 뒤 ' + val('t-artist') + '님께 ' + won(amts[ai]) + '원을 100% 그대로 전달해요.' + (code ? ' (팁 번호 ' + code + ')' : '');
+        $('#tip-sms-fallback').textContent = '문자 앱이 열리지 않으면 ' + smsNo + '로 ' + (code ? '팁 번호 ' + code + ' · ' : '') + '입금자명 · 금액 · 받을 뮤지션을 직접 보내 주세요.';
+        $('#tip-sms-again').setAttribute('href', lastLink);
+        openSheet('sheet-tip');
+        location.href = lastLink;
+      }
+      // 팁 기록을 서버에 남기고(입금 확인 전) 받은 팁 번호를 문자에 함께 적는다
+      if (!SB_ON) { go(''); return; }
+      busy(btn, true);
+      sbRpc('create_tip', { p_ref: ref, p_amount: amts[ai], p_payer: val('t-payer'), p_artist: val('t-artist'), p_show: ns && ns.id ? ns.id : null,
+                            p_message: val('t-msg') || null, p_song: val('t-song-in') || null })
+        .then(function (code) { busy(btn, false); go(typeof code === 'string' ? code : ''); }, function (e) {
+          busy(btn, false);
+          if (e && e.network) { go(''); return; }
+          toast(errMsg(e, '팁 기록을 남기지 못했어요. 잠시 후 다시 시도해 주세요'));
+        });
     });
     draw();
   };
@@ -973,7 +1140,7 @@
     if (lu) {
       var d = scheduleDates(TODAY, 1)[0];
       if (d) {
-        $('#lineup-head').textContent = (d === TODAY ? '오늘' : dayLabel(d)) + ' 행2PM8PM 라인업';
+        $('#lineup-head').textContent = (d === TODAY ? '오늘' : dayLabel(d)) + ' 라인업';
         lu.innerHTML = rowsHtml(d);
       }
     }
@@ -1011,6 +1178,7 @@
     if (/too_long/.test(m)) return '15초 이내 영상만 올릴 수 있어요';
     if (/too_many/.test(m)) return '하루에 10개까지 올릴 수 있어요. 내일 다시 올려 주세요';
     if (/not_member/.test(m)) return '가수 프로필을 확인하지 못했어요. 홈의 정보 수정에서 다시 등록해 주세요';
+    if (/bad_link/.test(m)) return '유튜브 · 인스타그램 영상 주소를 확인해 주세요';
     if (e && (e.status === 413 || /too large|maximum allowed size|Payload/i.test(m))) return '영상이 너무 커요. 30MB 이하로 올려 주세요';
     if (e && (e.status === 415 || /mime/i.test(m))) return 'mp4 · mov · webm 영상만 올릴 수 있어요';
     if (e && e.network) return '인터넷 연결이 불안정해요. 와이파이에서 다시 시도해 주세요';
@@ -1046,30 +1214,80 @@
       try { v.currentTime = Math.min(0.5, d / 2); } catch (x) { clearTimeout(t); res(null); }
     });
   }
-  function clipPost(r, url, mine) {
-    var sub = [r.lineup, (r.genres || []).slice(0, 2).join(' · '), ago(r.created_at)].filter(Boolean).join(' · ');
+  function clipMedia(r, url) {
+    var name = esc(r.artist_name || '가수');
+    if (r.source === 'youtube') {
+      var id = String(r.ext_id || ''); if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return '';
+      return '<div class="post-media tall ext yt" data-yt="' + id + '" role="button" tabindex="0" aria-label="' + name + ' 유튜브 영상 재생">' +
+        '<img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="" loading="lazy"><span class="src">YouTube</span><span class="ext-play" aria-hidden="true">' + ICON.play + '</span></div>';
+    }
+    if (r.source === 'instagram') {
+      var m = String(r.ext_id || '').match(/^(reel|p):([A-Za-z0-9_-]{5,40})$/); if (!m) return '';
+      return '<div class="post-media tall ext ig" data-ig="' + m[1] + '/' + m[2] + '" role="button" tabindex="0" aria-label="' + name + ' 인스타그램 영상 보기">' +
+        '<span class="src">Instagram</span><span class="ig-t"><span class="ext-play" aria-hidden="true">' + ICON.play + '</span>인스타그램 ' + (m[1] === 'p' ? '게시물' : '릴스') + ' 보기</span></div>';
+    }
     var poster = r.poster_path && url[r.poster_path] ? ' poster="' + esc(url[r.poster_path]) + '"' : '';
-    return '<article class="post" data-tags="rec" data-clip="' + esc(r.id) + '">' +
-      '<div class="row pad" style="padding-right:12px"><span class="row" style="flex:1;min-width:0;gap:10px"><span class="avatar plain ini" aria-hidden="true">' + esc(String(r.artist_name || '?').slice(0, 1)) + '</span>' +
-      '<span class="stack" style="gap:1px;min-width:0"><b style="font-size:15px">' + esc(r.artist_name) + '</b><span class="tiny">' + esc(sub) + '</span></span></span>' +
-      (mine ? '<button type="button" class="btn sm ghost" data-del-clip>내리기</button>' : '') + '</div>' +
-      '<div class="post-media tall"><video data-auto src="' + esc(url[r.video_path]) + '"' + poster + ' muted loop playsinline preload="none" aria-label="' + esc(r.artist_name) + ' 공연 클립"></video>' +
+    return '<div class="post-media tall"><video data-auto src="' + esc(url[r.video_path]) + '"' + poster + ' muted loop playsinline preload="none" aria-label="' + name + ' 공연 클립"></video>' +
       '<button type="button" class="snd" aria-pressed="false" aria-label="소리 켜기">' + ICON.mute + '</button>' +
-      '<span class="dur chip-glass mono" style="position:absolute;right:12px;bottom:12px">' + secLabel(r.duration) + '</span></div>' +
-      '<div class="post-actions"><button type="button" class="act" data-share aria-label="공유">' + ICON.share + '</button><span style="flex:1"></span>' +
-      '<a class="btn sm" href="tip.html?to=' + encodeURIComponent(r.artist_name || '') + '" style="background:var(--accent-soft);color:var(--accent)">' + ICON.gift + '팁</a></div>' +
-      (r.caption ? '<p class="pad" style="font-size:14px;line-height:1.55;white-space:pre-line">' + esc(r.caption) + '</p>' : '') + '</article>';
+      '<span class="dur chip-glass mono" style="position:absolute;right:12px;bottom:12px">' + secLabel(r.duration) + '</span></div>';
   }
-  function feedClips(after) {
-    var box = $('#feed-real'); if (!box) return;
-    function demo(on) { $$('[data-demo-post]').forEach(function (p) { if (on) p.removeAttribute('data-off'); else p.setAttribute('data-off', ''); }); }
+  var LIKED_KEY = 'csm-liked-clips';
+  function deviceId() { var d = store.get('csm-device', null); if (!d) { d = uid(); store.set('csm-device', d); } return d; }
+  function likedSet() { var l = store.get(LIKED_KEY, []) || []; var o = {}; l.forEach(function (x) { o[x] = 1; }); return o; }
+  function clipPost(r, url, mine) {
+    var media = clipMedia(r, url); if (!media) return '';
+    var sub = [r.lineup, (r.genres || []).slice(0, 2).join(' · '), ago(r.created_at)].filter(Boolean).join(' · ');
+    var liked = !!likedSet()[r.id];
+    return '<article class="post" data-tags="rec" data-clip="' + esc(r.id) + '">' +
+      '<div class="row pad" style="padding-right:12px"><a class="artist-btn" href="singer.html?id=' + encodeURIComponent(r.artist_id) + '" aria-label="' + esc(r.artist_name) + ' 프로필 보기" style="text-decoration:none"><span class="avatar plain ini" aria-hidden="true">' + esc(String(r.artist_name || '?').slice(0, 1)) + '</span>' +
+      '<span class="stack" style="gap:1px;min-width:0"><b style="font-size:15px">' + esc(r.artist_name) + '</b><span class="tiny">' + esc(sub) + '</span></span></a>' +
+      (mine ? '<button type="button" class="btn sm ghost" data-del-clip>내리기</button>' : '') + '</div>' + media +
+      '<div class="post-actions"><button type="button" class="act like" data-like aria-pressed="' + liked + '" aria-label="좋아요">' + ICON.heart + '<span data-n>' + won(r.likes || 0) + '</span></button>' +
+      '<button type="button" class="act" data-share aria-label="공유">' + ICON.share + '</button>' + snsHtml(r, true) + '<span style="flex:1"></span>' +
+      '<a class="btn sm" href="tip.html?to=' + encodeURIComponent(r.artist_name || '') + '" style="background:var(--accent-soft);color:var(--accent)">' + ICON.gift + '팁</a></div>' +
+      (r.caption ? '<p class="pad" style="font-size:14px;line-height:1.55;white-space:pre-line">' + esc(r.caption) + '</p>' : '') +
+      '<p class="pad views" data-views>조회 ' + won(r.views || 0) + '</p></article>';
+  }
+  // 클립 조회수: 화면에 반쯤 2초 보이면(파일 영상) · 눌러서 재생하면(SNS 영상) 한 번 (이 탭에서 클립마다 한 번)
+  var VIEWED = {}, VIEW_IO = null;
+  function countView(id) {
+    if (!id || VIEWED[id] || !SB_ON) return; VIEWED[id] = 1;
+    try { var ss = JSON.parse(sessionStorage.getItem('csm-viewed') || '{}'); if (ss[id]) return; ss[id] = 1; sessionStorage.setItem('csm-viewed', JSON.stringify(ss)); } catch (e) { /* 무시 */ }
+    sbRpc('view_clip', { p_clip: id }).catch(function () {});
+  }
+  function watchViews(box) {
+    if (!('IntersectionObserver' in window)) return;
+    if (!VIEW_IO) VIEW_IO = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        var el = e.target;
+        if (e.isIntersecting) el._vt = setTimeout(function () { countView(el.closest('[data-clip]').getAttribute('data-clip')); }, 2000);
+        else clearTimeout(el._vt);
+      });
+    }, { threshold: 0.5 });
+    $$('[data-clip] .post-media:not(.ext)', box).forEach(function (m) { VIEW_IO.observe(m); });
+  }
+  // 받은 클립 줄들에 서명된 임시 주소를 붙인다 (파일 영상만)
+  function isUp(r) { return !r.source || r.source === 'upload'; }
+  function clipSign(rows) {
+    rows = rows || [];
+    var paths = []; rows.forEach(function (r) { if (isUp(r)) { paths.push(r.video_path); if (r.poster_path) paths.push(r.poster_path); } });
+    if (!paths.length) return Promise.resolve(rows.map(function (r) { r._url = {}; return r; }));
+    return sbReq('/storage/v1/object/sign/clips', { method: 'POST', body: { expiresIn: 21600, paths: paths } }).then(function (signed) {
+      var url = {};
+      (signed || []).forEach(function (x) { var u = x && !x.error && (x.signedURL || x.signedUrl); if (u) url[x.path] = /^https?:/.test(u) ? u : CFG.url + '/storage/v1' + u; });
+      return rows.filter(function (r) { return !isUp(r) || url[r.video_path]; }).map(function (r) { r._url = url; return r; });
+    });
+  }
+  // 클립 묶음의 버튼들 (소리 · SNS 재생 · 좋아요 · 공유 · 내리기)
+  function clipBind(box, reload) {
     function soundBtn(b, on) { b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.setAttribute('aria-label', on ? '소리 끄기' : '소리 켜기'); b.innerHTML = on ? ICON.sound : ICON.mute; }
-    function bind() {
-      $$('.post-media', box).forEach(function (m) {
+    function muteAll(except) { $$('video', box).forEach(function (o) { if (o !== except) { o.muted = true; o.removeAttribute('data-sound'); } }); }
+    (function () {
+      $$('.post-media', box).filter(function (m) { return $('video', m); }).forEach(function (m) {
         var v = $('video', m), b = $('.snd', m);
         function flip() {
           var on = v.muted;
-          $$('video', box).forEach(function (o) { if (o !== v) { o.muted = true; o.removeAttribute('data-sound'); } });
+          muteAll(v);
           v.muted = !on;
           if (on) { v.setAttribute('data-sound', ''); var p = v.play(); if (p && p.catch) p.catch(function () {}); } else v.removeAttribute('data-sound');
           $$('.post-media', box).forEach(function (o) { var ob = $('.snd', o), ov = $('video', o); if (ob && ov) soundBtn(ob, !ov.muted); });
@@ -1077,6 +1295,30 @@
         v.addEventListener('volumechange', function () { soundBtn(b, !v.muted); });
         b.addEventListener('click', function (e) { e.stopPropagation(); flip(); });
         v.addEventListener('click', flip);
+      });
+      // 유튜브 · 인스타그램: 누르면 그 자리에서 재생 (누르기 전에는 SNS를 불러오지 않는다)
+      $$('.ext', box).forEach(function (m) {
+        function open() {
+          if (m.classList.contains('on')) return;
+          var yt = m.getAttribute('data-yt'), ig = m.getAttribute('data-ig'), label = m.getAttribute('aria-label') || '영상';
+          var src = yt ? 'https://www.youtube-nocookie.com/embed/' + yt + '?autoplay=1&playsinline=1&rel=0' : 'https://www.instagram.com/' + ig + '/embed/';
+          muteAll(null);
+          m.classList.add('on'); m.removeAttribute('role'); m.removeAttribute('tabindex'); m.removeAttribute('aria-label');
+          m.innerHTML = '<iframe src="' + esc(src) + '" title="' + esc(label) + '" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+          if (ig) m.insertAdjacentHTML('afterend', '<a class="sub pad" href="https://www.instagram.com/' + esc(ig) + '/" target="_blank" rel="noopener noreferrer">인스타그램 앱에서 보기</a>');
+          countView(m.closest('[data-clip]').getAttribute('data-clip'));
+        }
+        m.addEventListener('click', open);
+        m.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+      });
+      $$('[data-like]', box).forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = b.closest('[data-clip]').getAttribute('data-clip'), on = b.getAttribute('aria-pressed') !== 'true', n = $('[data-n]', b);
+          var l = (store.get(LIKED_KEY, []) || []).filter(function (x) { return x !== id; }); if (on) l.unshift(id); store.set(LIKED_KEY, l.slice(0, 500));
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          var cur = +String(n.textContent).replace(/[^0-9]/g, '') || 0; n.textContent = won(Math.max(0, cur + (on ? 1 : -1)));
+          if (SB_ON) sbRpc('like_clip', { p_clip: id, p_device: deviceId(), p_on: on }).then(function (c) { if (typeof c === 'number') n.textContent = won(c); }, function () {});
+        });
       });
       $$('[data-share]', box).forEach(function (b) { b.addEventListener('click', function () { share('컨택싱어 피드'); }); });
       $$('[data-del-clip]', box).forEach(function (b) {
@@ -1091,42 +1333,67 @@
           b.disabled = true; b.textContent = '내리는 중…';
           sbRpc('delete_my_clip', { p_id: m.id, p_token: m.token, p_clip: id }).then(function (ok) {
             if (!ok) throw new Error('no');
-            toast('영상을 내렸어요'); load();
+            toast('영상을 내렸어요'); if (reload) reload();
           }).catch(function () { b.disabled = false; b.removeAttribute('data-sure'); b.textContent = '내리기'; toast('내리지 못했어요. 잠시 후 다시 시도해 주세요'); });
         });
       });
-    }
+    })();
+    autoVideos(box); watchViews(box);
+  }
+  function feedClips(after) {
+    var box = $('#feed-real'); if (!box) return;
+    function demo(on) { $$('[data-demo-post]').forEach(function (p) { if (on) p.removeAttribute('data-off'); else p.setAttribute('data-off', ''); }); }
     function load() {
       if (!SB_ON) return Promise.resolve();
-      return sbRpc('public_clips', { p_limit: 30 }).then(function (rows) {
-        rows = rows || [];
-        if (!rows.length) return [];
-        var paths = []; rows.forEach(function (r) { paths.push(r.video_path); if (r.poster_path) paths.push(r.poster_path); });
-        return sbReq('/storage/v1/object/sign/clips', { method: 'POST', body: { expiresIn: 21600, paths: paths } }).then(function (signed) {
-          var url = {};
-          (signed || []).forEach(function (x) { var u = x && !x.error && (x.signedURL || x.signedUrl); if (u) url[x.path] = /^https?:/.test(u) ? u : CFG.url + '/storage/v1' + u; });
-          return rows.filter(function (r) { return url[r.video_path]; }).map(function (r) { r._url = url; return r; });
-        });
-      }).then(function (rows) {
+      return sbRpc('public_clips', { p_limit: 30 }).then(clipSign).then(function (rows) {
         var me = member('artist');
         box.innerHTML = rows.map(function (r) { return clipPost(r, r._url, !!(me && me.id === r.artist_id)); }).join('');
-        box.hidden = !rows.length; demo(!rows.length);
-        bind(); autoVideos(box); if (after) after();
+        var n = box.children.length;
+        box.hidden = !n; demo(!n);
+        clipBind(box, load); if (after) after();
       }).catch(function () { /* 서버에 닿지 못하면 예시 피드만 보여 준다 */ });
     }
-    // 올리기 화면
-    var fab = $('#fab-clip'), cu = {};
+    // 올리기 화면: 영상 파일 (15초 이내) 또는 SNS 영상 링크
+    var fab = $('#fab-clip'), cu = {}, mode = 'file';
     function cuErr(m) { var e = $('#cu-err'); if (e) { e.hidden = !m; e.textContent = m || ''; } }
-    function cuState() { var b = $('#cu-submit'); if (b && !cu.busy) b.disabled = !(cu.file && cu.dur && $('#cu-agree').checked); }
+    function cuState() {
+      var b = $('#cu-submit'); if (!b || cu.busy) return;
+      b.disabled = !((mode === 'file' ? (cu.file && cu.dur) : cu.link) && $('#cu-agree').checked);
+    }
+    function linkPrev() {
+      var pv = $('#cu-link-prev'), l = cu.link;
+      pv.hidden = !l;
+      if (!l) { pv.innerHTML = ''; return; }
+      if (l.source === 'youtube') pv.innerHTML = '<img src="https://i.ytimg.com/vi/' + l.id + '/mqdefault.jpg" alt=""><span class="stack" style="gap:2px"><b>유튜브 영상</b><span class="tiny">이 영상이 피드에 보여요</span></span>';
+      else pv.innerHTML = '<span class="sns ig" aria-hidden="true">' + ICON.ig + '</span><span class="stack" style="gap:2px"><b>인스타그램 ' + (l.id.indexOf('p:') === 0 ? '게시물' : '릴스') + '</b><span class="tiny">공개 계정의 영상만 보여요</span></span>';
+    }
     function cuReset() {
       if (cu.url) URL.revokeObjectURL(cu.url);
       cu = {};
       var v = $('#cu-video'); v.removeAttribute('src'); try { v.load(); } catch (x) { /* 무시 */ }
       $('#cu-file').value = ''; $('#cu-prev').hidden = true; $('#cu-meta').hidden = true; $('#cu-bar').hidden = true;
+      $('#cu-url').value = ''; linkPrev();
       $('#cu-cap').value = ''; $('#cu-agree').checked = false; $('span', $('#cu-pick')).textContent = '영상 고르기';
       cuErr(''); cuState();
     }
+    function posted(btn) {
+      cu.busy = false; busy(btn, false);
+      closeSheet($('#sheet-clip')); cuReset(); toast('피드에 올렸어요');
+      var rb = $('#feed-tabs [data-v="rec"]'); if (rb && rb.getAttribute('aria-pressed') !== 'true') rb.click();
+      load().then(function () { window.scrollTo(0, 0); });
+    }
     if ($('#cu-file')) {
+      single($('#cu-mode'), function (b) {
+        mode = b.getAttribute('data-v');
+        $('#cu-file-box').hidden = mode !== 'file'; $('#cu-link-box').hidden = mode !== 'link';
+        cuErr(''); cuState();
+        if (mode === 'link') setTimeout(function () { $('#cu-url').focus(); }, 0);
+      });
+      $('#cu-url').addEventListener('input', function () {
+        var v = this.value.trim();
+        cu.link = parseVideoLink(v); linkPrev();
+        cuErr(v && !cu.link ? '유튜브(쇼츠 · 영상) 또는 인스타그램(릴스 · 게시물) 영상 주소를 붙여넣어 주세요' : ''); cuState();
+      });
       $('#cu-file').addEventListener('change', function () {
         var f = this.files && this.files[0], ext = f ? clipExt(f) : '';
         cu.file = null; cu.dur = 0; cu.poster = null; cuErr(''); $('#cu-meta').hidden = true; cuState();
@@ -1148,19 +1415,23 @@
       });
       $('#cu-agree').addEventListener('change', cuState);
       $('#cu-submit').addEventListener('click', function () {
-        var m = member('artist'), btn = this; if (!m || !cu.file || cu.busy) return;
+        var m = member('artist'), btn = this, cap = $('#cu-cap').value.trim() || null;
+        if (!m || cu.busy) return;
+        function failed(e) { cu.busy = false; busy(btn, false); $('#cu-bar').hidden = true; cuErr(clipErr(e)); cuState(); }
+        if (mode === 'link') {
+          if (!cu.link) return;
+          cu.busy = true; busy(btn, true); btn.textContent = '올리는 중…'; cuErr('');
+          sbRpc('post_clip_link', { p_id: m.id, p_token: m.token, p_source: cu.link.source, p_ext_id: cu.link.id, p_caption: cap }).then(function () { posted(btn); }, failed);
+          return;
+        }
+        if (!cu.file) return;
         var base = m.id + '/' + uid(), vpath = base + '.' + cu.ext, ppath = cu.poster ? base + '.jpg' : null;
         var bar = $('#cu-bar'), bi = $('i', bar);
         cu.busy = true; busy(btn, true); btn.textContent = '올리는 중…'; cuErr(''); bar.hidden = false; bi.style.width = '3%';
         sbPut('clips', vpath, cu.file, CLIP_TYPE[cu.ext], function (p) { bi.style.width = Math.max(3, Math.round(p * 90)) + '%'; })
           .then(function () { return ppath ? sbPut('clips', ppath, cu.poster, 'image/jpeg').catch(function () { ppath = null; }) : null; })
-          .then(function () { return sbRpc('post_clip', { p_id: m.id, p_token: m.token, p_video: vpath, p_poster: ppath, p_caption: $('#cu-cap').value.trim() || null, p_duration: Math.round(cu.dur * 100) / 100 }); })
-          .then(function () {
-            bi.style.width = '100%'; cu.busy = false; busy(btn, false);
-            closeSheet($('#sheet-clip')); cuReset(); toast('피드에 올렸어요');
-            var rb = $('#feed-tabs [data-v="rec"]'); if (rb && rb.getAttribute('aria-pressed') !== 'true') rb.click();
-            load().then(function () { window.scrollTo(0, 0); });
-          }, function (e) { cu.busy = false; busy(btn, false); bar.hidden = true; cuErr(clipErr(e)); cuState(); });
+          .then(function () { return sbRpc('post_clip', { p_id: m.id, p_token: m.token, p_video: vpath, p_poster: ppath, p_caption: cap, p_duration: Math.round(cu.dur * 100) / 100 }); })
+          .then(function () { bi.style.width = '100%'; posted(btn); }, failed);
       });
     }
     if (fab) fab.addEventListener('click', function () {
@@ -1212,7 +1483,7 @@
       draw();
     });
   }
-  PAGES.match = function () { bindReq(document); memberStatus('artist'); loadPublicList('artist'); loadInbox('artist'); };
+  PAGES.match = function () { bindReq(document); memberStatus('artist'); loadPublicList('artist'); loadInbox('artist'); artistGigs(); };
 
   PAGES['venue-match'] = function () {
     var asked = st('venueAsked', {});
@@ -1233,12 +1504,12 @@
   };
 
   // 다가오는 무대: 실제 공연 일정에서 오늘부터 7일 (파트너 센터 · 홈의 사장님 화면)
-  function weekHtml() {
+  function weekHtml(src, mine) {
     var html = '';
     for (var i = 0; i < 7; i++) {
-      var d = addDays(TODAY, i), l = showsOn(d);
+      var d = addDays(TODAY, i), l = src ? src(d) : showsOn(d, function (s) { return isHang(s.v); });
       var left = '<span style="flex:none;width:58px;display:flex;flex-direction:column;gap:1px"><span class="mono" style="font-size:13px;font-weight:700;color:' + (l.length ? 'var(--accent-text)' : '#B42318') + '">' + md(d) + '</span><span class="tiny" style="font-size:11px">' + (i === 0 ? '오늘' : wd(d)) + (l[0] && l[0].t ? ' ' + l[0].t : '') + '</span></span>';
-      if (!l.length) html += '<li>' + left + '<span class="t"><b style="color:var(--muted)">컨택 필요</b></span><a class="btn sm" href="venue-match.html">AI 추천 보기</a></li>';
+      if (!l.length) html += '<li>' + left + '<span class="t"><b style="color:var(--muted)">' + (mine ? '공연 없음' : '컨택 필요') + '</b></span><a class="btn sm" href="' + (mine ? 'partner.html#gigs' : 'venue-match.html') + '">' + (mine ? '공고 올리기' : 'AI 추천 보기') + '</a></li>';
       else if (l[0].type === 'rental') html += '<li>' + left + '<span class="t"><b>대관</b><span>일반 공연 없음</span></span></li>';
       else {
         var names = l.map(function (s) { return (s.p ? s.p + ' ' : (l.length > 1 ? s.t + ' ' : '')) + who(s); }).join(' · ');
@@ -1250,7 +1521,7 @@
   }
 
   PAGES.partner = function () {
-    memberStatus('venue'); loadInbox('venue');
+    memberStatus('venue').then(venueCenter); loadInbox('venue');
     var req = st('partnerReq', {});
     $$('[data-request]').forEach(function (card) {
       var id = card.getAttribute('data-request');
@@ -1269,6 +1540,21 @@
   };
 
   PAGES.schedule = function () {
+    board($('#board'));
+    var hangDb = D.shows.filter(function (s) { return s.id && isHang(s.v) && s.d >= TODAY; });
+    var first = $('.month'), host = first ? first.parentNode : null;
+    if (hangDb.length && host) {
+      $$('.month', host).forEach(function (mm) { mm.remove(); });
+      var byM = {}, order = [];
+      hangDb.forEach(function (s) { var ym = s.d.slice(0, 7); if (!byM[ym]) { byM[ym] = {}; order.push(ym); } (byM[ym][s.d] = byM[ym][s.d] || []).push(s); });
+      host.insertAdjacentHTML('beforeend', order.map(function (ym) {
+        var days = Object.keys(byM[ym]).sort();
+        return '<div class="month" data-month="' + ym + '"><h3>' + (+ym.slice(0, 4)) + '년 ' + (+ym.slice(5)) + '월</h3><ul class="days">' + days.map(function (d) {
+          return '<li class="day" id="d-' + d + '" data-day="' + d + '"><span class="dt"><b>' + md(d) + '</b><span>' + wd(d) + '요일</span><span class="today-tag" hidden>오늘</span></span><ul>' +
+            byM[ym][d].map(function (s) { return s.type === 'rental' ? '<li class="rental">대관 · 일반 공연 없음</li>' : '<li><time datetime="' + d + 'T' + esc(s.t || '00:00') + ':00+09:00">' + esc(s.t) + '</time><span>' + esc(who(s)) + (s.p ? ' <span class="pt">' + esc(s.p) + '</span>' : '') + '</span></li>'; }).join('') + '</ul></li>';
+        }).join('') + '</ul></div>';
+      }).join(''));
+    }
     var shown = 0;
     $$('.day[data-day]').forEach(function (li) {
       var d = li.getAttribute('data-day');
@@ -1277,6 +1563,369 @@
     });
     $$('.month').forEach(function (m) { m.hidden = $$('.day', m).every(function (li) { return li.hidden; }); });
     var e = $('#sched-empty'); if (e) e.hidden = shown > 0;
+  };
+
+  /* ================================================================ 2단계: 사장님 · 가수 화면 (서버 데이터) */
+  var GSTATUS = { applied: ['지원 완료', 'wait'], picked: ['선정', 'yes'], declined: ['마감', 'no'], withdrawn: ['지원 취소', 'done'] };
+  var GIGST = { open: ['모집 중', 'wait'], filled: ['선정 완료', 'yes'], closed: ['마감', 'done'], cancelled: ['취소', 'no'] };
+  var PAYST = { unpaid: ['미지급', 'wait'], paid: ['지급 완료', 'yes'], none: ['', ''] };
+  function pillHtml(p) { return p && p[0] ? '<span class="pill ' + p[1] + '">' + esc(p[0]) + '</span>' : ''; }
+  function vRpc(fn, extra) { var m = member('venue'); var a = { p_id: m.id, p_token: m.token }; for (var k in (extra || {})) a[k] = extra[k]; return sbRpc(fn, a); }
+  function aRpc(fn, extra) { var m = member('artist'); var a = { p_id: m.id, p_token: m.token }; for (var k in (extra || {})) a[k] = extra[k]; return sbRpc(fn, a); }
+  function telA(p, label) { var t = telOf(p); return t ? '<a class="btn ghost sm" href="tel:' + esc(t) + '">' + esc(label || '전화') + '</a>' : ''; }
+  function sure(b, label, run) {   // 두 번 눌러야 실행 (실수 방지 · 알림창 없이)
+    if (!b.hasAttribute('data-sure')) {
+      b.setAttribute('data-sure', ''); var old = b.textContent; b.textContent = label;
+      setTimeout(function () { if (b.isConnected && !b.disabled && b.hasAttribute('data-sure')) { b.removeAttribute('data-sure'); b.textContent = old; } }, 3000);
+      return;
+    }
+    b.removeAttribute('data-sure'); run();
+  }
+  function rpcErr(e, map) {
+    var m = String((e && e.message) || '');
+    for (var k in map) if (m.indexOf(k) >= 0) return map[k];
+    return e && e.network ? '인터넷 연결을 확인해 주세요' : errMsg(e, '처리하지 못했어요. 잠시 후 다시 시도해 주세요');
+  }
+  function vShow(r) { return { id: r.id, d: r.show_date, t: r.show_time || '', p: r.part || '', a: r.kind === 'rental' ? '' : (r.artist_name || ''), type: r.kind === 'rental' ? 'rental' : 'show', status: r.status, pay: r.pay, pay_status: r.pay_status, gig_id: r.gig_id, aid: r.artist_id }; }
+
+  // ---------------------------------------------------------------- 사장님: 파트너 센터 (예약 · 공고 · 공연 일정 · 공연비)
+  function venueCenter(pr) {
+    var m = member('venue'); if (!m || !SB_ON || !pr) return;
+    var approved = pr.status === 'approved', data = { shows: [], bookings: [], gigs: [] };
+    var kpiSec = $('#kpi-t') && $('#kpi-t').closest('section');
+    // 정산: 예시 → 실제 공연비 지급
+    var sd = $('#settle'), sr = $('#settle-real');
+    if (sd && sr) { sd.hidden = true; sd.id = 'settle-demo'; sr.hidden = false; sr.id = 'settle'; }
+    $('#p-book').hidden = false; $('#gigs').hidden = false; $('#ps-new').hidden = false;
+    function kpis() {
+      if (!kpiSec) return;
+      var wk = addDays(TODAY, 7);
+      var n1 = data.shows.filter(function (s) { return s.status === 'scheduled' && s.show_date >= TODAY && s.show_date < wk && s.kind === 'show'; }).length;
+      var n2 = data.bookings.filter(function (b) { return b.status === 'requested'; }).length;
+      var n3 = data.gigs.filter(function (g) { return g.status === 'open'; }).length;
+      var n4 = data.shows.filter(function (s) { return s.status === 'scheduled' && s.kind === 'show' && s.pay_status === 'unpaid' && s.show_date <= TODAY; }).length;
+      $('.kpis', kpiSec).innerHTML = '<div><dt>이번 주 공연</dt><dd>' + n1 + '<small> 회</small></dd></div><div><dt>확정 전 예약</dt><dd>' + n2 + '<small> 건</small></dd></div>' +
+        '<div><dt>모집 중 공고</dt><dd>' + n3 + '<small> 건</small></dd></div><div><dt>공연비 미지급</dt><dd' + (n4 ? ' style="color:var(--accent)"' : '') + '>' + n4 + '<small> 건</small></dd></div>';
+      $('#kpi-note').textContent = '우리 매장';
+    }
+    // ---- 예약
+    var bf = 'todo';
+    function drawBookings() {
+      var rows = data.bookings.filter(function (b) { return bf === 'all' ? true : bf === 'today' ? b.show_date === TODAY : b.status === 'requested'; });
+      $('#pb-sum').textContent = '확정 전 ' + data.bookings.filter(function (b) { return b.status === 'requested'; }).length + '건 · 오늘 ' + data.bookings.filter(function (b) { return b.show_date === TODAY && (b.status === 'requested' || b.status === 'confirmed'); }).length + '건';
+      $('#pb-list').innerHTML = rows.length ? rows.map(function (b) {
+        var when = b.kind === 'rent' ? '대관 견적' + (b.show_date ? ' · ' + dayLabel(b.show_date) : '') : ((b.show_date ? dayLabel(b.show_date) : '') + ' ' + (b.show_time || '') + (b.artist ? ' · ' + b.artist : '')).trim();
+        var acts = b.status === 'requested' ? '<button type="button" class="btn sm" data-bset="confirmed">확정</button><button type="button" class="btn ghost sm" data-bset="declined">불가</button>'
+          : b.status === 'confirmed' ? '<button type="button" class="btn ghost sm" data-bset="visited">방문 완료</button><button type="button" class="btn ghost sm" data-bset="noshow">노쇼</button><button type="button" class="btn ghost sm" data-bset="cancelled">취소</button>' : '';
+        return '<div class="bk" data-bk="' + esc(b.id) + '"><div class="between" style="align-items:center"><b style="font-size:15px">' + esc(b.name) + ' · ' + b.people + '명</b>' + pillHtml(b.status === 'requested' ? ['확정 전', 'wait'] : BSTATUS[b.status]) + '</div>' +
+          '<span class="tiny">' + esc(when) + '</span>' + (b.request ? '<span class="tiny">요청: ' + esc(b.request) + '</span>' : '') + (b.reply ? '<span class="tiny">답변: ' + esc(b.reply) + '</span>' : '') +
+          '<div class="acts">' + telA(b.phone) + acts + '</div></div>';
+      }).join('') : '<p class="empty">' + (bf === 'todo' ? '확정을 기다리는 예약이 없어요' : bf === 'today' ? '오늘 예약이 없어요' : '아직 예약이 없어요') + '</p>';
+    }
+    single($('#pb-filter'), function (b) { bf = b.getAttribute('data-v'); drawBookings(); });
+    $('#pb-list').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-bset]'); if (!b) return;
+      var id = b.closest('[data-bk]').getAttribute('data-bk'), stt = b.getAttribute('data-bset');
+      function run() {
+        b.disabled = true;
+        vRpc('venue_booking_set', { p_booking: id, p_status: stt, p_reply: null }).then(function (ok) {
+          if (!ok) throw new Error('no'); toast((BSTATUS[stt] || [stt])[0] + '(으)로 바꿨어요' + (stt === 'confirmed' || stt === 'declined' || stt === 'cancelled' ? ' · 손님에게 알려요' : '')); loadAll();
+        }).catch(function (er) { b.disabled = false; toast(rpcErr(er, {})); });
+      }
+      if (stt === 'declined' || stt === 'cancelled' || stt === 'noshow') sure(b, '한 번 더 누르면 ' + b.textContent, run); else run();
+    });
+    // ---- 빈 무대 공고
+    var gf = $('#pg-form');
+    single($('#pg-lineup')); multi($('#pg-genres'));
+    $('#pg-date').min = TODAY;
+    $('#pg-new').addEventListener('click', function () {
+      if (!approved) { toast('매장이 승인되면 공고를 올릴 수 있어요'); return; }
+      gf.hidden = false; $('#pg-date').focus();
+    });
+    $('#pg-cancel').addEventListener('click', function () { gf.hidden = true; });
+    gf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!requireFields(gf, ['pg-date'])) return;
+      var btn = $('#pg-save'), lu = picked($('#pg-lineup'))[0];
+      busy(btn, true);
+      vRpc('post_gig', { p_date: val('pg-date'), p_time: val('pg-time') || null, p_pay: val('pg-pay') || null, p_lineup: lu && lu !== '상관없음' ? lu : null,
+                        p_genres: picked($('#pg-genres')), p_note: val('pg-note') || null }).then(function () {
+        busy(btn, false); gf.hidden = true; gf.reset(); toast('공고를 올렸어요 · 가수들이 지원하면 알려 드려요'); loadAll();
+      }, function (er) { busy(btn, false); toast(rpcErr(er, { not_approved: '매장이 승인되면 공고를 올릴 수 있어요', bad_date: '오늘 이후 날짜를 골라 주세요', too_many: '모집 중인 공고는 20개까지예요' })); });
+    });
+    function drawGigs() {
+      var box = $('#pg-list');
+      if (!approved) { box.innerHTML = '<p class="note">매장이 승인되면 빈 무대 공고를 올릴 수 있어요.</p>'; return; }
+      var gs = data.gigs;
+      box.innerHTML = gs.length ? gs.map(function (g) {
+        var apps = (g.apps || []).filter(function (a) { return a.status !== 'withdrawn'; });
+        var head = '<div class="between" style="align-items:center"><h3>' + esc(dayLabel(g.gig_date) + (g.gig_time ? ' ' + g.gig_time : '')) + '</h3>' + pillHtml(GIGST[g.status]) + '</div>' +
+          '<div class="meta">' + esc([g.pay || '공연비 협의', g.lineup, (g.genres || []).join(' · ')].filter(Boolean).join(' · ')) + '</div>' + (g.note ? '<p class="tiny" style="margin:0">' + esc(g.note) + '</p>' : '');
+        var list = apps.length ? '<div class="apps"><span class="tiny">지원한 가수 ' + apps.length + '명</span>' + apps.map(function (a) {
+          return '<div class="gapp" data-app="' + esc(a.app_id) + '"><div class="between" style="align-items:center"><a href="singer.html?id=' + encodeURIComponent(a.artist_id) + '" style="color:var(--fg);font-weight:700">' + esc(a.name) + '</a>' + pillHtml(GSTATUS[a.status]) + '</div>' +
+            '<span class="tiny">' + esc([a.lineup, (a.genres || []).join(' · '), a.region].filter(Boolean).join(' · ') || '컨택싱어 가수') + '</span>' +
+            (a.message ? '<span style="font-size:13.5px">“' + esc(a.message) + '”</span>' : '') + (snsHtml(a) ? '<div class="sns-row">' + snsHtml(a) + '</div>' : '') +
+            '<div class="acts row" style="gap:6px">' + (g.status === 'open' && a.status === 'applied' ? '<button type="button" class="btn sm" data-pick>이 가수로 확정</button>' : '') + (a.phone ? telA(a.phone, '전화 ' + a.phone) : '') + '</div></div>';
+        }).join('') + '</div>' : (g.status === 'open' ? '<p class="tiny" style="margin:0">아직 지원한 가수가 없어요</p>' : '');
+        return '<article class="gcard" data-gig="' + esc(g.id) + '">' + head + list + (g.status === 'open' ? '<div class="row end"><button type="button" class="btn ghost sm" data-gclose>공고 마감</button></div>' : '') + '</article>';
+      }).join('') : '<p class="empty">올린 공고가 없어요. ‘공고 올리기’로 첫 공고를 올려 보세요</p>';
+    }
+    $('#pg-list').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pick], [data-gclose]'); if (!b) return;
+      if (b.hasAttribute('data-pick')) {
+        var app = b.closest('[data-app]').getAttribute('data-app');
+        sure(b, '한 번 더 누르면 확정돼요', function () {
+          b.disabled = true;
+          vRpc('pick_gig_app', { p_app: app }).then(function () { toast('확정했어요 · 공연 일정에 들어갔고 가수에게 알려요'); loadAll(); }, function (er) { b.disabled = false; toast(rpcErr(er, { not_open: '이미 마감된 공고예요' })); });
+        });
+      } else {
+        var gid = b.closest('[data-gig]').getAttribute('data-gig');
+        sure(b, '한 번 더 누르면 마감돼요', function () {
+          b.disabled = true;
+          vRpc('close_gig', { p_gig: gid, p_status: 'closed' }).then(function () { toast('공고를 마감했어요'); loadAll(); }, function (er) { b.disabled = false; toast(rpcErr(er, {})); });
+        });
+      }
+    });
+    // ---- 공연 일정 (추가 · 수정 · 취소) + 공연비 지급
+    var sf = $('#ps-form'), editing = null;
+    $('#ps-date').min = addDays(TODAY, -1);
+    $('#ps-new').addEventListener('click', function () { editing = null; sf.reset(); sf.hidden = false; $('#ps-save').textContent = '일정 저장'; $('#ps-date').focus(); });
+    $('#ps-cancel').addEventListener('click', function () { sf.hidden = true; editing = null; });
+    sf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!requireFields(sf, ['ps-date'])) return;
+      var btn = $('#ps-save'); busy(btn, true);
+      vRpc('venue_save_show', { p_show: editing, p_date: val('ps-date'), p_time: val('ps-time') || null, p_part: val('ps-part') || null, p_artist: val('ps-artist') || null,
+                                p_kind: $('#ps-rental').checked ? 'rental' : 'show', p_pay: val('ps-pay') || null }).then(function () {
+        busy(btn, false); sf.hidden = true; sf.reset(); toast(editing ? '일정을 고쳤어요' : '공연 일정을 올렸어요 · 손님 앱에 보여요'); editing = null; store.set(SHOWS_KEY, null); loadAll();
+      }, function (er) { busy(btn, false); toast(rpcErr(er, { bad_date: '날짜를 확인해 주세요', too_many: '앞으로 일정은 300개까지 올릴 수 있어요' })); });
+    });
+    function drawShows() {
+      var ul = $('#week'), up = data.shows.filter(function (s) { return s.show_date >= TODAY; }).slice(0, 40);
+      ul.innerHTML = up.length ? up.map(function (s) {
+        var off = s.status === 'cancelled', name = s.kind === 'rental' ? '대관 · 일반 공연 없음' : (s.artist_name || '가수 미정');
+        return '<li data-show="' + esc(s.id) + '"' + (off ? ' style="opacity:.55"' : '') + '><span style="flex:none;width:62px;display:flex;flex-direction:column;gap:1px"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent-text)">' + md(s.show_date) + '</span><span class="tiny" style="font-size:11px">' + (s.show_date === TODAY ? '오늘' : wd(s.show_date)) + (s.show_time ? ' ' + esc(s.show_time) : '') + '</span></span>' +
+          '<span class="t"><b>' + esc(name) + (s.part ? ' · ' + esc(s.part) : '') + '</b><span>' + esc([off ? '취소됨' : '', s.pay ? '공연비 ' + s.pay : '', s.gig_id ? '공고에서 선정' : ''].filter(Boolean).join(' · ') || '예정') + '</span></span>' +
+          '<span class="row" style="gap:4px">' + (off ? '<button type="button" class="btn ghost sm" data-sset="scheduled">되살리기</button>' : '<button type="button" class="btn ghost sm" data-sedit>수정</button><button type="button" class="btn ghost sm" data-sset="cancelled">취소</button>') + '</span></li>';
+      }).join('') : '<li><span class="t"><b style="color:var(--muted)">올린 공연 일정이 없어요</b><span>‘공연 추가’로 날짜 · 가수를 올리면 손님 앱의 공연 일정에 바로 떠요</span></span></li>';
+      // 공연비
+      var due = data.shows.filter(function (s) { return s.status === 'scheduled' && s.kind === 'show' && s.pay_status !== 'none' && s.show_date <= TODAY; }).slice(-30).reverse();
+      var unpaid = due.filter(function (s) { return s.pay_status === 'unpaid'; }).length;
+      $('#sr-sum').textContent = due.length ? '미지급 ' + unpaid + '건' : '';
+      $('#sr-list').innerHTML = due.length ? due.map(function (s) {
+        return '<li data-show="' + esc(s.id) + '"><span class="t"><b>' + esc(dayLabel(s.show_date) + ' ' + (s.artist_name || '가수')) + '</b><span>' + esc(s.pay || '공연비') + '</span></span>' +
+          (s.pay_status === 'paid' ? '<button type="button" class="btn ghost sm" data-pay="unpaid">지급 완료 ✓</button>' : '<button type="button" class="btn sm" data-pay="paid">지급 완료로</button>') + '</li>';
+      }).join('') : '<li><span class="t"><b style="color:var(--muted)">지난 공연의 공연비 기록이 없어요</b><span>공연비를 적어 둔 공연이 끝나면 여기에 보여요</span></span></li>';
+    }
+    function showAct(e) {
+      var b = e.target.closest('[data-sset], [data-sedit], [data-pay]'); if (!b) return;
+      var id = b.closest('[data-show]').getAttribute('data-show'), s = data.shows.filter(function (x) { return x.id === id; })[0];
+      if (b.hasAttribute('data-sedit') && s) {
+        editing = id; sf.hidden = false; $('#ps-save').textContent = '고친 내용 저장';
+        $('#ps-date').value = s.show_date; $('#ps-time').value = s.show_time || ''; $('#ps-part').value = s.part || ''; $('#ps-artist').value = s.artist_name || ''; $('#ps-pay').value = s.pay || ''; $('#ps-rental').checked = s.kind === 'rental';
+        $('#ps-artist').disabled = !!s.artist_id; sf.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      var args = b.hasAttribute('data-pay') ? { p_show: id, p_status: null, p_pay_status: b.getAttribute('data-pay') } : { p_show: id, p_status: b.getAttribute('data-sset'), p_pay_status: null };
+      function run() {
+        b.disabled = true;
+        vRpc('venue_show_set', args).then(function (ok) { if (!ok) throw new Error('no'); toast(args.p_pay_status ? (args.p_pay_status === 'paid' ? '공연비 지급 완료로 체크했어요' : '미지급으로 되돌렸어요') : (args.p_status === 'cancelled' ? '공연을 취소했어요' : '공연을 되살렸어요')); store.set(SHOWS_KEY, null); loadAll(); },
+          function (er) { b.disabled = false; toast(rpcErr(er, {})); });
+      }
+      if (args.p_status === 'cancelled') sure(b, '한 번 더 누르면 취소', run); else run();
+    }
+    $('#week').addEventListener('click', showAct); $('#sr-list').addEventListener('click', showAct);
+    function loadAll() {
+      return Promise.all([vRpc('venue_shows').catch(function () { return []; }), vRpc('venue_bookings').catch(function () { return []; }), vRpc('venue_gigs').catch(function () { return []; })]).then(function (r) {
+        data.shows = r[0] || []; data.bookings = r[1] || []; data.gigs = r[2] || [];
+        kpis(); drawBookings(); drawGigs(); drawShows();
+        if (location.hash && !venueCenter.scrolled) { venueCenter.scrolled = true; var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView({ block: 'start' }); }
+      });
+    }
+    loadAll();
+  }
+
+  // 홈 (사장님): 오늘 요약 + 다가오는 무대
+  function venueHome(pr) {
+    var m = member('venue'); if (!m || !SB_ON || !pr) return;
+    Promise.all([vRpc('venue_shows').catch(function () { return []; }), vRpc('venue_bookings').catch(function () { return []; }), vRpc('venue_gigs').catch(function () { return []; })]).then(function (r) {
+      var shows = r[0] || [], bookings = r[1] || [], gigs = r[2] || [];
+      var box = $('#v-sum'); if (box) {
+        box.hidden = false;
+        var n1 = shows.filter(function (s) { return s.show_date === TODAY && s.status === 'scheduled' && s.kind === 'show'; }).length;
+        var n2 = bookings.filter(function (b) { return b.status === 'requested'; }).length;
+        var n3 = bookings.filter(function (b) { return b.show_date === TODAY && (b.status === 'requested' || b.status === 'confirmed'); }).reduce(function (a, b) { return a + (b.people || 0); }, 0);
+        var n4 = gigs.reduce(function (a, g) { return a + (g.status === 'open' ? (g.apps || []).filter(function (x) { return x.status === 'applied'; }).length : 0); }, 0);
+        $('#v-kpis').innerHTML = '<div><dt>오늘 공연</dt><dd>' + n1 + '<small> 회</small></dd></div><div><dt>오늘 예약 손님</dt><dd>' + n3 + '<small> 명</small></dd></div>' +
+          '<a href="partner.html#p-book" style="text-decoration:none;color:inherit"><div style="height:100%"><dt>확정 전 예약</dt><dd' + (n2 ? ' style="color:var(--accent)"' : '') + '>' + n2 + '<small> 건</small></dd></div></a>' +
+          '<a href="partner.html#gigs" style="text-decoration:none;color:inherit"><div style="height:100%"><dt>공고 새 지원</dt><dd' + (n4 ? ' style="color:var(--accent)"' : '') + '>' + n4 + '<small> 명</small></dd></div></a>';
+      }
+      var vw = $('#v-week'); if (vw) {
+        var list = shows.filter(function (s) { return s.status === 'scheduled'; }).map(vShow);
+        vw.innerHTML = weekHtml(function (d) { return list.filter(function (s) { return s.d === d; }); }, true);
+        $('#v-week-note').textContent = '우리 매장 일정';
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- 가수: 홈 (내 프로필 링크 · 공연 · 공고 · 팁 · 클립 반응)
+  function profileUrl(id) { return location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '') + 'singer.html?id=' + id; }
+  function artistHome(pr) {
+    var m = member('artist'); if (!m || !SB_ON || !pr) return;
+    var lk = $('#a-link');
+    if (lk) {
+      lk.hidden = false;
+      if (pr.status === 'approved') {
+        $('#a-link-url').value = profileUrl(m.id); $('#a-link-open').href = 'singer.html?id=' + m.id;
+        $('#a-link-copy').addEventListener('click', function () {
+          var u = profileUrl(m.id);
+          (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { toast('내 프로필 링크를 복사했어요'); }, function () { $('#a-link-url').select(); toast('주소를 길게 눌러 복사해 주세요'); });
+        });
+      } else { $('#a-link-url').value = '프로필이 승인되면 열려요'; $('#a-link-copy').disabled = true; $('#a-link-open').hidden = true; }
+    }
+    Promise.all([aRpc('my_shows').catch(function () { return []; }), aRpc('my_gig_apps').catch(function () { return []; }), sbRpc('open_gigs', {}).catch(function () { return []; }),
+                 aRpc('my_tips').catch(function () { return []; }), aRpc('my_clip_stats').catch(function () { return []; })]).then(function (r) {
+      var shows = r[0] || [], apps = r[1] || [], gigs = r[2] || [], tips = r[3] || [], clips = r[4] || [];
+      var ym = TODAY.slice(0, 7), mine = {}; apps.forEach(function (a) { mine[a.gig_id] = a; });
+      var up = shows.filter(function (s) { return s.show_date >= TODAY && s.status === 'scheduled'; });
+      var tipSum = tips.filter(function (t) { return t.status === 'confirmed' && String(t.confirmed_at || t.created_at).slice(0, 7) === ym; }).reduce(function (a, t) { return a + t.amount; }, 0);
+      var views = clips.reduce(function (a, c) { return a + (c.views || 0); }, 0), likes = clips.reduce(function (a, c) { return a + (c.likes || 0); }, 0);
+      $('#a-sum').hidden = false;
+      $('#a-kpis').innerHTML = '<div><dt>다가오는 공연</dt><dd>' + up.length + '<small> 회</small></dd></div><div><dt>이번 달 받은 팁</dt><dd>' + won(tipSum) + '<small> 원</small></dd></div>' +
+        '<div><dt>클립 조회</dt><dd>' + won(views) + '</dd></div><div><dt>클립 좋아요</dt><dd>' + won(likes) + '</dd></div>';
+      // 내 공연 일정 + 지원 중인 공고
+      var rows = up.map(function (s) {
+        return '<li><span class="t"><b>' + esc(dayLabel(s.show_date) + (s.show_time ? ' ' + s.show_time : '') + ' · ' + s.venue_name) + '</b><span>' + esc([areaOf(s), s.pay ? '공연비 ' + s.pay : ''].filter(Boolean).join(' · ')) + '</span></span>' + pillHtml(PAYST[s.pay_status]) + '</li>';
+      }).concat(apps.filter(function (a) { return a.status === 'applied' && a.gig_date >= TODAY; }).map(function (a) {
+        return '<li><span class="t"><b>' + esc(dayLabel(a.gig_date) + (a.gig_time ? ' ' + a.gig_time : '') + ' · ' + a.venue_name) + '</b><span>공고 지원 · 사장님 확인 중</span></span>' + pillHtml(GSTATUS.applied) + '</li>';
+      }));
+      var sh = $('#a-shows'); sh.hidden = false;
+      $('ul', sh).innerHTML = rows.length ? rows.join('') : '<li><span class="t"><b style="color:var(--muted)">잡힌 공연이 아직 없어요</b><span>빈 무대 공고에 지원하거나 라이브바에 컨택해 보세요</span></span><a class="btn sm" href="match.html#gigs">공고 보기</a></li>';
+      // 빈 무대 공고 (지원 안 한 것 3개)
+      var open = gigs.filter(function (g) { return !mine[g.id]; }).slice(0, 3), gg = $('#a-gigs');
+      gg.hidden = !open.length;
+      $('ul', gg).innerHTML = open.map(function (g) {
+        return '<li><span class="t"><b>' + esc(g.venue_name + ' · ' + dayLabel(g.gig_date) + (g.gig_time ? ' ' + g.gig_time : '')) + '</b><span>' + esc([g.pay || '공연비 협의', g.lineup, areaOf(g)].filter(Boolean).join(' · ')) + '</span></span><a class="btn sm" href="match.html#gigs">지원</a></li>';
+      }).join('');
+      // 받은 팁 · 신청곡
+      var tb = $('#a-tips'); tb.hidden = false;
+      $('#a-tips-sum').textContent = '이번 달 ' + won(tipSum) + '원';
+      $('ul', tb).innerHTML = tips.length ? tips.slice(0, 6).map(function (t) {
+        var extra = [t.song ? '♪ ' + t.song : '', t.message ? '“' + t.message + '”' : ''].filter(Boolean).join(' · ');
+        return '<li><span class="t"><b>' + esc(t.payer) + ' · ' + (t.status === 'confirmed' ? won(t.amount) + '원' : '입금 확인 중') + '</b><span>' + esc(extra || (t.venue_name || '') + ' · ' + ago(t.created_at)) + '</span></span>' +
+          (t.status === 'confirmed' ? '<span class="pill yes">전달</span>' : '<span class="pill wait">확인 중</span>') + '</li>';
+      }).join('') : '<li><span class="t"><b style="color:var(--muted)">아직 받은 팁이 없어요</b><span>손님이 현장 팁을 보내면 신청곡 · 한마디와 함께 여기에 보여요</span></span></li>';
+      // 클립 반응
+      var cb = $('#a-clips'); cb.hidden = !clips.length;
+      $('ul', cb).innerHTML = clips.slice(0, 5).map(function (c) {
+        return '<li><span class="t"><b>' + esc(c.caption || (c.source === 'youtube' ? '유튜브 영상' : c.source === 'instagram' ? '인스타그램 영상' : '공연 클립')) + '</b><span>' + esc(ago(c.created_at) + (c.status === 'hidden' ? ' · 관리자가 숨김' : '')) + '</span></span><span class="tiny" style="white-space:nowrap">조회 ' + won(c.views) + ' · ♥ ' + won(c.likes) + '</span></li>';
+      }).join('');
+    });
+  }
+
+  // 무대 컨택 (가수): 빈 무대 공고 · 지원 · 내 지원 현황
+  function artistGigs() {
+    var box = $('#gg-list'); if (!box) return;
+    if (!SB_ON) { box.innerHTML = '<p class="empty">공고는 서버에 연결되면 보여요</p>'; return; }
+    var cur = null, gigsById = {};
+    function load() {
+      var m = member('artist');
+      return Promise.all([sbRpc('open_gigs', {}), m ? aRpc('my_gig_apps').catch(function () { return []; }) : Promise.resolve([])]).then(function (r) {
+        var gigs = r[0] || [], apps = r[1] || [], mine = {}; apps.forEach(function (a) { mine[a.gig_id] = a; });
+        gigsById = {}; gigs.forEach(function (g) { gigsById[g.id] = g; });
+        $('#gg-count').textContent = gigs.length ? gigs.length + '건 모집 중' : '';
+        box.innerHTML = gigs.length ? gigs.map(function (g) {
+          var a = mine[g.id];
+          return '<article class="gcard" data-gig="' + esc(g.id) + '"><div class="between" style="align-items:center"><h3>' + esc(g.venue_name) + '</h3><span class="tiny">' + esc(areaOf(g)) + '</span></div>' +
+            '<div class="meta"><b>' + esc(dayLabel(g.gig_date) + (g.gig_time ? ' ' + g.gig_time : '')) + '</b> · ' + esc([g.pay || '공연비 협의', g.lineup, (g.genres || []).join(' · ')].filter(Boolean).join(' · ')) + '</div>' +
+            (g.note ? '<p class="tiny" style="margin:0">' + esc(g.note) + '</p>' : '') +
+            '<div class="between" style="align-items:center"><span class="tiny">지원 ' + (g.apps || 0) + '명</span>' +
+            (a && a.status === 'applied' ? '<span class="row" style="gap:6px">' + pillHtml(GSTATUS.applied) + '<button type="button" class="btn ghost sm" data-withdraw="' + esc(a.app_id) + '">지원 취소</button></span>'
+              : a ? pillHtml(GSTATUS[a.status]) : '<button type="button" class="btn sm" data-apply>지원하기</button>') + '</div></article>';
+        }).join('') : '<p class="empty">지금 모집 중인 공고가 없어요. 새 공고가 올라오면 여기에 보여요</p>';
+        var mb = $('#gg-mine'), done = apps.filter(function (a) { return a.status !== 'applied' || !gigsById[a.gig_id]; });
+        mb.hidden = !done.length;
+        $('ul', mb).innerHTML = done.map(function (a) {
+          return '<li><span class="t"><b>' + esc(a.venue_name + ' · ' + dayLabel(a.gig_date) + (a.gig_time ? ' ' + a.gig_time : '')) + '</b><span>' + esc(a.status === 'picked' ? '공연 일정에 들어갔어요' + (a.venue_phone ? ' · 매장 ' + a.venue_phone : '') : a.status === 'declined' ? '다른 가수로 마감됐어요' : a.status === 'withdrawn' ? '지원을 취소했어요' : '공고가 마감됐어요') + '</span></span>' +
+            (a.status === 'picked' && a.venue_phone ? telA(a.venue_phone, '전화') : pillHtml(GSTATUS[a.status])) + '</li>';
+        }).join('');
+      }).catch(function () { box.innerHTML = '<p class="empty">공고를 불러오지 못했어요. 잠시 후 다시 열어 주세요</p>'; });
+    }
+    box.addEventListener('click', function (e) {
+      var ap = e.target.closest('[data-apply]'), wd2 = e.target.closest('[data-withdraw]');
+      if (ap) {
+        if (!member('artist')) { toast('가수 프로필을 먼저 등록해 주세요'); setTimeout(function () { location.href = 'index.html?edit=artist'; }, 1200); return; }
+        cur = ap.closest('[data-gig]').getAttribute('data-gig'); var g = gigsById[cur] || {};
+        $('#ap-info').textContent = (g.venue_name || '') + ' · ' + (g.gig_date ? dayLabel(g.gig_date) : '') + (g.gig_time ? ' ' + g.gig_time : '') + ' · ' + (g.pay || '공연비 협의');
+        $('#ap-msg').value = ''; openSheet('sheet-apply');
+      }
+      if (wd2) sure(wd2, '한 번 더 누르면 취소', function () {
+        wd2.disabled = true;
+        aRpc('withdraw_gig_app', { p_app: wd2.getAttribute('data-withdraw') }).then(function () { toast('지원을 취소했어요'); load(); }, function (er) { wd2.disabled = false; toast(rpcErr(er, {})); });
+      });
+    });
+    var send = $('#ap-send');
+    if (send) send.addEventListener('click', function () {
+      if (!cur) return; busy(send, true);
+      aRpc('apply_gig', { p_gig: cur, p_message: val('ap-msg') || null }).then(function () {
+        busy(send, false); closeSheet($('#sheet-apply')); toast('지원했어요 · 사장님이 고르면 알려 드려요'); load();
+      }, function (er) { busy(send, false); toast(rpcErr(er, { not_open: '마감된 공고예요', not_member: '가수 프로필을 다시 확인해 주세요' })); });
+    });
+    load();
+    if (location.hash === '#gigs') setTimeout(function () { var t = $('#gigs'); if (t) t.scrollIntoView({ block: 'start' }); }, 300);
+  }
+
+  // ---------------------------------------------------------------- 내 예약 화면 (mybooking.html)
+  PAGES.mybooking = function () {
+    function paint(all) {
+      var sp = splitBookings(all);
+      $('#mb-loading').hidden = true;
+      $('#mb-up').hidden = !sp.up.length; $('#mb-up-list').innerHTML = sp.up.map(bookCardHtml).join('');
+      $('#mb-past').hidden = !sp.past.length; $('#mb-past-list').innerHTML = sp.past.slice(0, 20).map(bookCardHtml).join('');
+      $('#mb-empty').hidden = !!(sp.up.length || sp.past.length);
+    }
+    var local = myBookingsLocal();
+    if (local.length) paint(local);
+    refreshBookings().then(paint, function () { paint(myBookingsLocal()); });
+  };
+
+  // ---------------------------------------------------------------- 가수 공개 프로필 (singer.html?id=)
+  PAGES.singer = function () {
+    var id = new URLSearchParams(location.search).get('id') || '';
+    function none() { $('#sg-loading').hidden = true; $('#sg-none').hidden = false; }
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !SB_ON) { none(); return; }
+    Promise.all([sbRpc('public_artist', { p_id: id }), sbRpc('public_shows', { p_from: TODAY, p_days: 60, p_artist: id }).catch(function () { return []; }),
+                 sbRpc('public_clips', { p_limit: 20, p_artist: id }).then(clipSign).catch(function () { return []; })]).then(function (r) {
+      var a = r[0] && r[0][0], shows = r[1] || [], clips = r[2] || [];
+      if (!a) { none(); return; }
+      document.title = a.name + ' | 컨택싱어 가수 프로필';
+      $('#sg-loading').hidden = true; $('#sg-head').hidden = false;
+      $('#sg-ini').textContent = String(a.name || '?').slice(0, 1); $('#sg-name').textContent = a.name;
+      $('#sg-meta').textContent = [a.lineup, (a.genres || []).join(' · '), a.region].filter(Boolean).join(' · ') || '컨택싱어 가수';
+      $('#sg-sns').innerHTML = snsHtml(a);
+      var bio = $('#sg-bio'); bio.hidden = !a.bio; bio.textContent = a.bio || '';
+      $('#sg-tip').href = 'tip.html?to=' + encodeURIComponent(a.name);
+      var list = shows.map(function (s) { return { id: s.id, d: s.show_date, t: s.show_time || '', p: s.part || '', a: s.artist_name, aid: s.artist_id, v: s.venue_name, vid: s.venue_id, area: s.area, type: 'show' }; });
+      $('#sg-book').href = list[0] ? bookHref(list[0]) : 'booking.html';
+      if (list.length) {
+        $('#sg-shows-box').hidden = false;
+        $('#sg-shows').innerHTML = list.slice(0, 10).map(function (s) {
+          return '<li><span class="t"><b>' + esc(dayLabel(s.d) + (s.t ? ' ' + s.t : '') + ' · ' + s.v) + '</b><span>' + esc(areaOf(s)) + '</span></span><a class="btn sm" href="' + bookHref(s) + '">예약</a></li>';
+        }).join('');
+      }
+      var cs = (a.careers || []).filter(function (c) { return c && (c[0] || c.place); });
+      if (cs.length) { $('#sg-careers-box').hidden = false; $('#sg-careers').innerHTML = cs.slice(0, 12).map(function (c) { return '<li><span class="t"><b>' + esc(c[0] || c.place) + '</b><span>' + esc(c[1] || c.date || '') + '</span></span></li>'; }).join(''); }
+      if (clips.length) {
+        var box = $('#sg-clips'); $('#sg-clips-box').hidden = false;
+        box.innerHTML = clips.map(function (c) { return clipPost(c, c._url, false); }).join('');
+        clipBind(box, null);
+      }
+    }, none);
+    $('#sg-share').addEventListener('click', function () {
+      var u = location.href, t = ($('#sg-name').textContent || '가수') + ' | 컨택싱어';
+      if (navigator.share) navigator.share({ title: t, url: u }).catch(function () {});
+      else (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(function () { toast('프로필 링크를 복사했어요'); }, function () { toast(u); });
+    });
   };
 
   /* ---------- 등록 폼 (싱어 · 매장) ---------- */
@@ -1289,6 +1938,62 @@
       if (label) label.textContent = fs.length > 1 ? fs.length + '개 파일 선택' : (fs[0] ? fs[0].name : label.getAttribute('data-empty'));
       if (onPick) onPick(fs);
     });
+  }
+  /* ---------- 가수 SNS: 인스타그램 아이디 · 유튜브 채널 주소 정리 ---------- */
+  function igHandle(v) {
+    v = String(v || '').trim(); if (!v) return '';
+    var m = v.match(/^(?:https?:\/\/)?(?:www\.|m\.)?instagram\.com\/([^/?#]+)/i); if (m) v = m[1];
+    v = v.replace(/^@/, '');
+    if (!/^[A-Za-z0-9._]{1,30}$/.test(v) || /^(p|reel|reels|tv|stories|explore|accounts)$/i.test(v)) return null;
+    return v;
+  }
+  function ytChannel(v) {
+    v = String(v || '').trim(); if (!v) return '';
+    if (/^@[^\s/?#]{3,30}$/.test(v)) return 'https://www.youtube.com/@' + encodeURIComponent(v.slice(1));
+    if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+    var u; try { u = new URL(v); } catch (e) { return null; }
+    var h = u.hostname.toLowerCase().replace(/^(www|m|music)\./, ''), p = u.pathname.replace(/\/+$/, '');
+    if (h === 'youtu.be') return /^\/[A-Za-z0-9_-]{11}$/.test(p) ? 'https://youtu.be' + p : null;
+    if (h !== 'youtube.com') return null;
+    var ch = p.match(/^\/(@[A-Za-z0-9._%-]{3,120}|channel\/[A-Za-z0-9_-]{10,40}|c\/[A-Za-z0-9._%-]{1,120}|user\/[A-Za-z0-9._%-]{1,120})(?:\/(?:videos|shorts|featured|streams|about))?$/);
+    if (ch) return 'https://www.youtube.com/' + ch[1];
+    var vid = u.searchParams.get('v') || '';
+    if (p === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(vid)) return 'https://www.youtube.com/watch?v=' + vid;
+    if (/^\/shorts\/[A-Za-z0-9_-]{11}$/.test(p)) return 'https://www.youtube.com' + p;
+    return null;
+  }
+  function snsCheck(pre) {
+    var ig = igHandle(val(pre + '-insta')), yt = ytChannel(val(pre + '-yt')), bad = null;
+    [[pre + '-insta', ig], [pre + '-yt', yt]].forEach(function (x) {
+      var el = document.getElementById(x[0]), er = document.getElementById(x[0] + '-err'), b = x[1] === null;
+      if (er) er.hidden = !b; if (el) el.setAttribute('aria-invalid', b ? 'true' : 'false'); if (b && !bad) bad = el;
+    });
+    if (bad) { bad.scrollIntoView({ block: 'center', behavior: 'smooth' }); try { bad.focus({ preventScroll: true }); } catch (e) { bad.focus(); } return null; }
+    return { instagram: ig, youtube: yt };
+  }
+  function snsHtml(x, compact) {
+    var ig = x && igHandle(x.instagram), yt = x && x.youtube ? ytChannel(x.youtube) : '', out = '';
+    if (ig) out += '<a class="sns ig" href="https://www.instagram.com/' + encodeURIComponent(ig) + '/" target="_blank" rel="noopener noreferrer" aria-label="인스타그램 @' + esc(ig) + ' (새 창)">' + ICON.ig + '<span>' + (compact ? '인스타' : '@' + esc(ig)) + '</span></a>';
+    if (yt) out += '<a class="sns yt" href="' + esc(yt) + '" target="_blank" rel="noopener noreferrer" aria-label="유튜브 채널 (새 창)">' + ICON.yt + '<span>유튜브</span></a>';
+    return out;
+  }
+  // SNS 영상 주소 → { source: 'youtube', id } / { source: 'instagram', id: 'reel:코드' }
+  function parseVideoLink(v) {
+    v = String(v || '').trim(); if (!v) return null;
+    if (!/^https?:\/\//i.test(v)) v = 'https://' + v;
+    var u; try { u = new URL(v); } catch (e) { return null; }
+    var h = u.hostname.toLowerCase().replace(/^(www|m)\./, ''), p = u.pathname, m;
+    if (h === 'youtu.be') { m = p.match(/^\/([A-Za-z0-9_-]{11})(?:\/|$)/); return m ? { source: 'youtube', id: m[1] } : null; }
+    if (h === 'youtube.com' || h === 'youtube-nocookie.com') {
+      var vid = u.searchParams.get('v') || '';
+      if (p === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(vid)) return { source: 'youtube', id: vid };
+      m = p.match(/^\/(?:shorts|live|embed)\/([A-Za-z0-9_-]{11})(?:\/|$)/); return m ? { source: 'youtube', id: m[1] } : null;
+    }
+    if (h === 'instagram.com') {
+      m = p.match(/^\/(?:[A-Za-z0-9._]+\/)?(reel|reels|p|tv)\/([A-Za-z0-9_-]{5,40})(?:\/|$)/);
+      return m ? { source: 'instagram', id: (m[1] === 'p' ? 'p' : 'reel') + ':' + m[2] } : null;
+    }
+    return null;
   }
   function requireFields(form, ids) {
     var bad = [];
@@ -1334,6 +2039,7 @@
     $('#ar-agree').addEventListener('change', function () { $('#ar-agree-err').hidden = true; });
     $('#ar-submit').addEventListener('click', function () {
       if (!requireFields($('#ar-form'), ['ar-photo', 'ar-name', 'ar-age', 'ar-phone'])) return;
+      var sns = snsCheck('ar'); if (!sns) return;
       if (!agreeOk('ar-agree')) return;
       var careers = $$('.crow', rows).map(function (r) { var ins = $$('input', r); return [ins[0].value.trim(), ins[1].value.trim()]; }).filter(function (c) { return c[0]; });
       var tracks = [];
@@ -1347,12 +2053,12 @@
         link: val('ar-video-link') || val('ar-audio-link') || null,
         details: { age: +val('ar-age') || null, region: val('ar-region') || null, bio: val('ar-bio') || null, careers: careers,
                    audio_link: val('ar-audio-link') || null, video_link: val('ar-video-link') || null,
-                   audio_file: au ? au.name : null, video_file: vf ? vf.name : null }
+                   audio_file: au ? au.name : null, video_file: vf ? vf.name : null, instagram: sns.instagram, youtube: sns.youtube }
       };
       var btn = $('#ar-submit'); busy(btn, true);
       saveMember('artist', row, [{ folder: 'artist-photo', files: [photo], set: function (r, ps) { r.photo_path = ps[0]; } }]).then(function (where) {
         busy(btn, false); savedWhere(where);
-        put('role', 'artist'); put('profile-artist', { name: row.name, phone: row.phone, lineup: row.lineup || '', genres: row.genres, link: row.link || '', at: TODAY });
+        put('role', 'artist'); put('profile-artist', { name: row.name, phone: row.phone, lineup: row.lineup || '', genres: row.genres, link: row.link || '', instagram: sns.instagram, youtube: sns.youtube, at: TODAY });
         openSheet('sheet-done');
       }, function (e) { busy(btn, false); saveFail(e); });
     });
@@ -1514,14 +2220,22 @@
   if (page === 'intro' && new URLSearchParams(location.search).get('source') === 'app' && ROLE_LABEL[st('role')] && !location.hash) { location.replace('home.html'); return; }
   // 오프라인일 때 안내 화면 (https 사이트에서만 등록)
   if ('serviceWorker' in navigator && location.protocol === 'https:') { try { navigator.serviceWorker.register('sw.js').catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ } }
-  if (PAGES[page]) PAGES[page]();
-  autoVideos();
-  loadRemote();
-  // 화면 지도의 '오늘' 공연 줄
-  var tl = $('[data-bind="tonight"]');
-  if (tl) { var ns = nextShow(); tl.textContent = ns ? (ns.d === TODAY ? '오늘 ' : dayLabel(ns.d) + ' ') + ns.t + ' · ' + who(ns) : '다음 일정 준비 중'; }
-  // 예시 화면의 '다가오는 토요일' 날짜
-  var sat = addDays(TODAY, 1); while (wd(sat) !== '토') sat = addDays(sat, 1);
-  $$('[data-bind="next-sat"]').forEach(function (el) { el.textContent = md(sat); });
-  $$('[data-bind="next-sat-label"]').forEach(function (el) { el.textContent = '다음 공연 ' + dayLabel(sat); });
+  function start() {
+    if (PAGES[page]) PAGES[page]();
+    autoVideos();
+    loadRemote();
+    // 화면 지도의 '오늘' 공연 줄
+    var tl = $('[data-bind="tonight"]');
+    if (tl) { var ns = nextShow(); tl.textContent = ns ? (ns.d === TODAY ? '오늘 ' : dayLabel(ns.d) + ' ') + ns.t + ' · ' + who(ns) + (isHang(ns.v) ? '' : ' · ' + ns.v) : '다음 일정 준비 중'; }
+    // 예시 화면의 '다가오는 토요일' 날짜
+    var sat = addDays(TODAY, 1); while (wd(sat) !== '토') sat = addDays(sat, 1);
+    $$('[data-bind="next-sat"]').forEach(function (el) { el.textContent = md(sat); });
+    $$('[data-bind="next-sat-label"]').forEach(function (el) { el.textContent = '다음 공연 ' + dayLabel(sat); });
+  }
+  // 공연 일정을 쓰는 화면은 데이터베이스 일정을 먼저 받는다 (1.5초 넘으면 받아 둔 일정 · 기본 일정으로 시작)
+  var NEED_SHOWS = { home: 1, schedule: 1, booking: 1, tip: 1, feed: 1, clip: 1, singer: 1 };
+  if (NEED_SHOWS[page] && SB_ON) {
+    var started = false, go = function () { if (!started) { started = true; start(); } };
+    loadShows().then(go); setTimeout(go, 1500);
+  } else start();
 })();

@@ -47,7 +47,7 @@
 <main id="main" class="main no-tab">
 
 <section class="card" aria-labelledby="t-who-t">
-  <span class="row tiny" style="gap:6px;color:var(--fg-2)"><span style="width:8px;height:8px;border-radius:4px;background:var(--accent)"></span><span id="t-stage">오늘 행2PM8PM 무대</span></span>
+  <span class="row tiny" style="gap:6px;color:var(--fg-2)"><span style="width:8px;height:8px;border-radius:4px;background:var(--accent)"></span><span id="t-stage">오늘 무대</span></span>
   <h2 id="t-who-t" style="font-size:15px">누구에게 팁을 줄까요?</h2>
   <div class="chips" id="t-artists" role="group" aria-label="오늘 공연하는 뮤지션"></div>
   <div class="field"><label class="lbl" for="t-artist">받을 뮤지션 <span class="req">*</span></label><input class="in-text" id="t-artist" type="text" placeholder="뮤지션 이름" required aria-required="true" maxlength="40"><p class="err" id="t-artist-err" hidden>받을 뮤지션 이름을 입력해 주세요</p></div>
@@ -76,12 +76,11 @@
 </section>
 
 <section class="stack s8" aria-labelledby="t-msg-t">
-  <h2 id="t-msg-t" style="font-size:15px">문자에 함께 적기</h2>
+  <h2 id="t-msg-t" style="font-size:15px">팁과 함께 보내기</h2>
   <div class="field"><label class="lbl" for="t-payer">입금자명 <span class="req">*</span></label><input class="in-text" id="t-payer" type="text" placeholder="통장에 찍히는 이름" required aria-required="true" maxlength="20" autocomplete="name"><p class="err" id="t-payer-err" hidden>입금자명을 입력해 주세요</p></div>
   <label for="t-msg" class="sr">뮤지션에게 한마디</label>
   <input id="t-msg" class="in-text" type="text" placeholder="뮤지션에게 한마디 (선택)" maxlength="80">
-  <div id="t-song" hidden><label for="t-song-in" class="sr">신청곡</label><input id="t-song-in" class="in-text" type="text" placeholder="신청곡 · 우선 반영돼요" style="border:1.5px solid var(--accent);background:var(--accent-soft)"></div>
-  <div id="t-song-lock" class="row empty" style="gap:10px;font-size:13px;line-height:1.45"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span>신청곡 우선권은 <b style="color:var(--fg)">큰손</b>(누적 10만원) 또는 <b style="color:var(--fg)">찐단골</b>(직관 15회)부터 열려요</span></div>
+  <div id="t-song"><label for="t-song-in" class="sr">신청곡</label><input id="t-song-in" class="in-text" type="text" placeholder="신청곡 (선택) · 뮤지션에게 바로 전달돼요" maxlength="100" style="border:1.5px solid var(--accent);background:var(--accent-soft)"></div>
 </section>
 
 <section class="card" aria-label="내 팬 등급" style="gap:14px">

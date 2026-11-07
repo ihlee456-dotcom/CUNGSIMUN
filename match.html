@@ -47,6 +47,12 @@
 <main id="main" class="main">
 
 <div class="stack s8" data-real="status" hidden></div>
+<section class="stack s8" id="gigs" aria-labelledby="gg-t" style="scroll-margin-top:70px">
+  <div class="between"><h2 id="gg-t" class="sec-t">빈 무대 공고</h2><span class="tiny" id="gg-count"></span></div>
+  <p class="tiny" style="margin-top:-4px">사장님이 올린 날짜 · 공연비를 보고 바로 지원해요. 뽑히면 공연 일정에 자동으로 들어가요</p>
+  <div class="stack s8" id="gg-list"><p class="empty">공고를 불러오는 중이에요</p></div>
+  <div class="stack s8" id="gg-mine" hidden><h3 class="sec-t" style="font-size:14px">내 지원 현황</h3><ul class="ulist"></ul></div>
+</section>
 <a class="card" href="artist.html" data-demo="me" style="flex-direction:row;align-items:center;gap:12px;padding:12px 14px"><span class="avatar ph-box" style="width:44px;height:44px;border-radius:22px"></span><span class="stack" style="flex:1;min-width:0;gap:2px"><b style="font-size:15px">새벽오렌지</b><span class="tiny">어쿠스틱 · 인디팝 · 2인 · 금–일 저녁 가능</span></span><span class="tiny">프로필</span></a>
 <section class="stack" aria-labelledby="m-t">
   <div class="stack" style="gap:4px"><div class="row" style="gap:8px"><span class="tag mono" style="border-color:var(--accent);color:var(--accent);font-size:11px;padding:1px 7px">AI</span><h2 id="m-t" class="sec-t">나에게 맞는 무대</h2></div><p class="sub" style="line-height:1.5">공연 영상 · 장르 · 관객 반응을 분석해 매장 컨셉과 맞춰봤어요. 마음에 드는 무대에 먼저 연락해 보세요 (예시 매칭)</p></div>
@@ -82,7 +88,7 @@
 
 </div>
 <nav class="tabbar" aria-label="하단 메뉴" style="--tabs:5"><a href="home.html"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/></svg><span>홈</span></a><a href="feed.html"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg><span>피드</span></a><a href="tip.html"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8S10.5 3.5 8 4.2 8.5 8 12 8Zm0 0s1.5-4.5 4-3.8S15.5 8 12 8Z"/></svg><span>현장 팁</span></a><a href="match.html" aria-current="page"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="12" r="5.5"/><circle cx="15" cy="12" r="5.5"/></svg><span>컨택</span></a><a href="booking.html"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5v-2A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v2a3.5 3.5 0 0 0 0 7v2a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-2a3.5 3.5 0 0 0 0-7Z"/><path d="M14 5v14" stroke-dasharray="2 2.5"/></svg><span>예약</span></a></nav>
-
+<div class="sheet-bg" id="sheet-apply" hidden><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-apply-t"><h2 id="sheet-apply-t">이 공고에 지원할까요?</h2><p id="ap-info" class="tiny"></p><div class="field"><label class="lbl" for="ap-msg">사장님께 한마디 (선택)</label><textarea class="in-text" id="ap-msg" maxlength="300" rows="3" placeholder="예: 잔잔한 어쿠스틱 셋 1시간 준비할게요 · 장비는 기타만 가져가요" style="min-height:80px"></textarea></div><p class="tiny">지원하면 사장님이 내 프로필 · SNS · 한마디를 보고 골라요. 뽑히면 매장 연락처가 보이고 알림이 가요.</p><button type="button" class="btn block" id="ap-send">지원하기</button><button type="button" class="btn ghost block" data-close>닫기</button></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script src="config.js"></script>
 <script src="data.js"></script>

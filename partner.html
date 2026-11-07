@@ -48,7 +48,7 @@
 
 <div class="stack s8" data-real="status" hidden></div>
 <section class="stack s8" aria-labelledby="kpi-t">
-  <div class="between"><h2 id="kpi-t" style="font-size:15px;color:var(--muted)">이번 주</h2><span class="tiny">예시 수치</span></div>
+  <div class="between"><h2 id="kpi-t" style="font-size:15px;color:var(--muted)">이번 주</h2><span class="tiny" id="kpi-note">예시 수치</span></div>
   <dl class="kpis"><div><dt>진행 공연</dt><dd>7<small> 회</small></dd></div><div><dt>테이블 예약</dt><dd>46<small> 건</small></dd></div><div><dt>공연 클립 조회</dt><dd>3.1K</dd></div><div><dt>매장 팔로워</dt><dd style="color:var(--accent)">+128</dd></div></dl>
 </section>
 <section class="stack s8" aria-labelledby="req-t">
@@ -64,9 +64,39 @@
   <div class="between r-done" style="align-items:center;min-height:44px;padding:0 12px;border-radius:12px;background:var(--surface-2)" hidden><span class="r-status" style="font-size:13px;font-weight:500"></span><button type="button" class="act" data-act="undo" style="font-size:12px;color:var(--muted)">되돌리기</button></div>
 </article></div>
 </section>
+<section class="stack s8" id="p-book" aria-labelledby="pb-t" style="scroll-margin-top:70px" hidden>
+  <div class="between"><h2 id="pb-t" class="sec-t">예약 관리</h2><span class="tiny" id="pb-sum"></span></div>
+  <div class="seg" id="pb-filter" role="group" aria-label="예약 보기"><button type="button" aria-pressed="true" data-v="todo">확정 전</button><button type="button" aria-pressed="false" data-v="today">오늘</button><button type="button" aria-pressed="false" data-v="all">전체</button></div>
+  <div class="stack s8" id="pb-list"></div>
+</section>
+<section class="stack s8" id="gigs" aria-labelledby="pg-t" style="scroll-margin-top:70px" hidden>
+  <div class="between"><h2 id="pg-t" class="sec-t">빈 무대 공고</h2><button type="button" class="btn sm" id="pg-new"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>공고 올리기</button></div>
+  <p class="tiny" style="margin-top:-4px">날짜 · 공연비를 올리면 가수들이 지원해요. 마음에 드는 가수를 고르면 공연 일정에 자동으로 들어가요</p>
+  <form class="card stack" id="pg-form" hidden style="gap:12px" novalidate>
+    <div class="grid g2" style="gap:10px"><div class="field"><label class="lbl" for="pg-date">날짜 <span class="req">*</span></label><input class="in-text" id="pg-date" type="date" placeholder="" required aria-required="true"><p class="err" id="pg-date-err" hidden>날짜를 골라 주세요</p></div><div class="field"><label class="lbl" for="pg-time">시간</label><input class="in-text" id="pg-time" type="text" placeholder="예: 20:00" maxlength="20"></div></div>
+    <div class="field"><label class="lbl" for="pg-pay">공연비 · 조건</label><input class="in-text" id="pg-pay" type="text" placeholder="예: 회당 15만원 · 식사 제공" maxlength="60"></div>
+    <div class="field" role="group" aria-labelledby="pg-lineup-l" id="pg-lineup"><span class="lbl" id="pg-lineup-l">편성</span><div class="grid g4"><button type="button" class="chip sq" data-v="상관없음" aria-pressed="true">상관없음</button><button type="button" class="chip sq" data-v="솔로" aria-pressed="false">솔로</button><button type="button" class="chip sq" data-v="듀오" aria-pressed="false">듀오</button><button type="button" class="chip sq" data-v="밴드 (3인+)" aria-pressed="false">밴드 (3인+)</button></div></div>
+    <div class="field" role="group" aria-labelledby="pg-genres-l" id="pg-genres"><span class="lbl" id="pg-genres-l">원하는 장르 (여러 개) <span style="color:var(--muted);font-weight:400">· 여러 개 선택</span></span><div class="chips"><button type="button" class="chip" data-v="어쿠스틱" aria-pressed="false">어쿠스틱</button><button type="button" class="chip" data-v="인디팝" aria-pressed="false">인디팝</button><button type="button" class="chip" data-v="발라드" aria-pressed="false">발라드</button><button type="button" class="chip" data-v="재즈" aria-pressed="false">재즈</button><button type="button" class="chip" data-v="시티팝" aria-pressed="false">시티팝</button><button type="button" class="chip" data-v="록 · 밴드" aria-pressed="false">록 · 밴드</button><button type="button" class="chip" data-v="R&amp;B · 소울" aria-pressed="false">R&amp;B · 소울</button></div></div>
+    <div class="field"><label class="lbl" for="pg-note">하고 싶은 말 (선택)</label><textarea class="in-text" id="pg-note" maxlength="500" rows="3" placeholder="예: 1시간 2부 공연 · 앰프 · 마이크 있어요" style="min-height:76px"></textarea></div>
+    <div class="grid g2" style="gap:8px"><button type="button" class="btn ghost" id="pg-cancel">닫기</button><button type="submit" class="btn" id="pg-save">공고 올리기</button></div>
+  </form>
+  <div class="stack s8" id="pg-list"></div>
+</section>
 <section class="stack s8" id="schedule" aria-labelledby="wk-t" style="scroll-margin-top:70px">
-  <div class="between"><h2 id="wk-t" class="sec-t">이번 주 무대</h2><a class="sub" href="schedule.html">전체 일정</a></div>
+  <div class="between"><h2 id="wk-t" class="sec-t">이번 주 무대</h2><span class="row" style="gap:8px"><button type="button" class="btn ghost sm" id="ps-new" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>공연 추가</button><a class="sub" href="schedule.html">전체 일정</a></span></div>
+  <form class="card stack" id="ps-form" hidden style="gap:12px" novalidate>
+    <div class="grid g2" style="gap:10px"><div class="field"><label class="lbl" for="ps-date">날짜 <span class="req">*</span></label><input class="in-text" id="ps-date" type="date" placeholder="" required aria-required="true"><p class="err" id="ps-date-err" hidden>날짜를 골라 주세요</p></div><div class="field"><label class="lbl" for="ps-time">시간</label><input class="in-text" id="ps-time" type="text" placeholder="예: 19:30" maxlength="20"></div></div>
+    <div class="grid g2" style="gap:10px"><div class="field"><label class="lbl" for="ps-artist">가수 이름</label><input class="in-text" id="ps-artist" type="text" placeholder="예: 민현정 (미정이면 비워 두기)" maxlength="80"></div><div class="field"><label class="lbl" for="ps-part">부</label><input class="in-text" id="ps-part" type="text" placeholder="예: 1부" maxlength="20"></div></div>
+    <div class="field"><label class="lbl" for="ps-pay">공연비 (선택)</label><input class="in-text" id="ps-pay" type="text" placeholder="예: 15만원" maxlength="60"></div>
+    <label class="agree"><input type="checkbox" id="ps-rental"><span>이날은 대관이라 일반 공연이 없어요</span></label>
+    <div class="grid g2" style="gap:8px"><button type="button" class="btn ghost" id="ps-cancel">닫기</button><button type="submit" class="btn" id="ps-save">일정 저장</button></div>
+  </form>
   <ul class="ulist" id="week"><li><span class="t"><b>공연 일정을 불러오는 중이에요</b></span></li></ul>
+</section>
+<section class="stack s8" id="settle-real" aria-labelledby="sr-t" style="scroll-margin-top:70px" hidden>
+  <div class="between"><h2 id="sr-t" class="sec-t">공연비 지급</h2><span class="tiny" id="sr-sum"></span></div>
+  <p class="tiny" style="margin-top:-4px">공연이 끝나면 가수에게 공연비를 보냈는지 체크해 두세요. 관리자 사이트에서도 함께 확인해요</p>
+  <ul class="ulist" id="sr-list"></ul>
 </section>
 <section class="stack s8" id="settle" aria-labelledby="st-t" style="scroll-margin-top:70px">
   <div class="between"><h2 id="st-t" class="sec-t">지난달 정산</h2><span class="tiny">예시 금액</span></div>
